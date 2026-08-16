@@ -795,6 +795,20 @@ function togglePause() {
   }
 }
 
+function returnToStart() {
+  cancelAnimationFrame(animationId);
+  animationId = 0;
+  Object.keys(keys).forEach((key) => setDirection(key, false));
+  if (game) {
+    game.running = false;
+    game.paused = false;
+  }
+  hideMessage();
+  stopMusic();
+  gameScreen.hidden = true;
+  startScreen.hidden = false;
+}
+
 function setDirection(direction, pressed) {
   keys[direction] = pressed;
   document.querySelector(`[data-direction="${direction}"]`)?.classList.toggle("active", pressed);
@@ -903,6 +917,11 @@ function startMusic() {
   musicTimer = setInterval(musicScheduler, 120);
 }
 
+function stopMusic() {
+  clearInterval(musicTimer);
+  musicTimer = 0;
+}
+
 function toggleMusic() {
   musicEnabled = !musicEnabled;
   musicButton.textContent = musicEnabled ? "♪" : "🔇";
@@ -916,6 +935,7 @@ function toggleMusic() {
 startButton.addEventListener("click", startGame);
 pauseButton.addEventListener("click", togglePause);
 musicButton.addEventListener("click", toggleMusic);
+document.querySelector("#homeButton").addEventListener("click", returnToStart);
 ui.weaponButton.addEventListener("click", equipNextWeapon);
 document.querySelector("#rulesButton").addEventListener("click", () => rulesDialog.showModal());
 document.querySelector("#closeRules").addEventListener("click", () => rulesDialog.close());
