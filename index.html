@@ -1,0 +1,111 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#07162d">
+  <title>藍紅小隊大對決</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="app">
+    <section id="startScreen" class="start-screen" aria-labelledby="gameTitle">
+      <div class="hero-card">
+        <p class="eyebrow">小隊射擊闖關遊戲</p>
+        <h1 id="gameTitle">
+          <span class="blue-text">藍色小隊</span>
+          <span class="versus">VS</span>
+          <span class="red-text">紅色軍團</span>
+        </h1>
+
+        <div class="teams-preview" aria-hidden="true">
+          <div class="preview-squad blue-squad">
+            <span class="preview-person big"></span>
+            <span class="preview-person"></span>
+            <span class="preview-person"></span>
+          </div>
+          <div class="battle-burst">砰！</div>
+          <div class="preview-squad red-squad">
+            <span class="preview-person"></span>
+            <span class="preview-person big"></span>
+            <span class="preview-person"></span>
+          </div>
+        </div>
+
+        <section class="rules-card" aria-labelledby="rulesTitle">
+          <h2 id="rulesTitle" class="rainbow-text">遊戲規則</h2>
+          <ul>
+            <li><span>🎯</span> 自動射擊，左右移動閃避敵軍子彈。</li>
+            <li><span>🚪</span> 射滿 <strong>500 發</strong>打開增員門，隊伍增加 1 人。</li>
+            <li><span>⚡</span> 射滿 <strong>600 發</strong>打開射速鎖，最高提升至 2.5 倍。</li>
+            <li><span>🔵</span> 收集 100 個藍色能量，變身 500 生命的大型隊員。</li>
+            <li><span>🔫</span> 每過 10 關解鎖更強武器；裝備一次花費 10 金幣。</li>
+            <li><span>🏆</span> 每次過關獲得 10 金幣。小兵 100 生命，大兵 500 生命。</li>
+          </ul>
+          <p class="tip">兩道防彈牆只有中央通道可以通過：小兵一次最多 10 人，大兵一次只能 1 人！</p>
+        </section>
+
+        <button id="startButton" class="rainbow-button" type="button">
+          <span>開始遊戲</span>
+          <small>準備迎戰紅色軍團！</small>
+        </button>
+      </div>
+    </section>
+
+    <section id="gameScreen" class="game-screen" hidden aria-label="遊戲畫面">
+      <header class="hud">
+        <div class="hud-brand">
+          <strong>藍紅小隊</strong>
+          <button id="rulesButton" class="icon-button" type="button" aria-label="查看規則">？</button>
+        </div>
+        <div class="stats">
+          <span>關卡 <strong id="levelValue">1</strong></span>
+          <span>隊員 <strong id="squadValue">1</strong></span>
+          <span>金幣 <strong id="coinValue">0</strong></span>
+          <span>射速 <strong id="speedValue">1.0×</strong></span>
+        </div>
+      </header>
+
+      <div class="weapon-bar">
+        <div>
+          <span class="label">目前武器</span>
+          <strong id="weaponName">練習手槍</strong>
+        </div>
+        <div class="energy-wrap">
+          <span>大型能量 <strong id="energyValue">0</strong>/100</span>
+          <div class="meter"><i id="energyMeter"></i></div>
+        </div>
+        <button id="weaponButton" type="button" disabled>下一把槍尚未解鎖</button>
+      </div>
+
+      <div id="gameWrap" class="game-wrap">
+        <canvas id="gameCanvas" aria-label="藍色小隊射擊遊戲"></canvas>
+        <div id="message" class="game-message" hidden></div>
+        <button id="pauseButton" class="pause-button" type="button" aria-label="暫停遊戲">Ⅱ</button>
+      </div>
+
+      <div class="controls" aria-label="移動控制">
+        <button class="move-button" data-direction="left" type="button">
+          <span>◀</span><small>向左</small>
+        </button>
+        <button class="move-button back" data-direction="back" type="button">
+          <span>▼</span><small>向後</small>
+        </button>
+        <button class="move-button" data-direction="right" type="button">
+          <span>▶</span><small>向右</small>
+        </button>
+      </div>
+      <p class="keyboard-tip">電腦可使用 ← → ↓ 或 A D S 操作</p>
+    </section>
+
+    <dialog id="rulesDialog">
+      <button id="closeRules" class="dialog-close" type="button" aria-label="關閉規則">×</button>
+      <h2 class="rainbow-text">遊戲規則</h2>
+      <p>左右移動藍色小隊、向後撤退閃避。隊伍會自動射擊，消滅所有紅色敵軍即可過關。</p>
+      <p>敵方子彈會傷害其中一名隊員；隊員生命歸零就會離隊。隊伍全滅則挑戰失敗。</p>
+    </dialog>
+  </main>
+
+  <script src="game.js"></script>
+</body>
+</html>
