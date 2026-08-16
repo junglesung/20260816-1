@@ -79,6 +79,7 @@ function startGame() {
   game = makeGame();
   beginLevel();
   updateHud();
+  startMusic();
   lastFrame = performance.now();
   cancelAnimationFrame(animationId);
   animationId = requestAnimationFrame(loop);
@@ -280,14 +281,14 @@ function updateEnemies(dt) {
         vx: Math.cos(angle) * (enemy.big ? 155 : 175),
         vy: Math.sin(angle) * (enemy.big ? 155 : 175),
         radius: enemy.big ? 5 : 4,
-        damage: enemy.big ? 45 : 34
+        damage: enemy.big ? 2 : 1
       });
       enemy.shootTimer = random(enemy.big ? 900 : 1250, enemy.big ? 1450 : 1900);
     }
 
     if (distance(enemy, game.player) < enemy.radius + game.player.radius + 4 || enemy.y > view.height + 30) {
       game.enemies.splice(i, 1);
-      damageSquad(enemy.big ? 100 : 55);
+      damageSquad(enemy.big ? 35 : 18);
     }
   }
 }
@@ -355,7 +356,7 @@ function hitBarrier(x, y, radius) {
 }
 
 function gateAtPoint(x, y) {
-  const gateY = view.height * 0.47;
+  const gateY = view.height * 0.64;
   const size = Math.min(86, view.width * 0.14);
   return game.gates.find((gate) => {
     const gateX = gate.side === "left" ? size * 0.62 : view.width - size * 0.62;
@@ -545,7 +546,7 @@ function drawArena() {
 }
 
 function drawGates() {
-  const gateY = view.height * 0.47;
+  const gateY = view.height * 0.64;
   const size = Math.min(86, view.width * 0.14);
   game.gates.forEach((gate) => {
     const x = gate.side === "left" ? size * 0.62 : view.width - size * 0.62;
@@ -574,28 +575,77 @@ function drawGates() {
 
 function drawEnemies() {
   game.enemies.forEach((enemy) => {
+    const u = enemy.radius / 16;
+    const bodyColor = enemy.big ? "#c62644" : "#ff506a";
+    const darkColor = enemy.big ? "#7c1730" : "#a3283f";
+    const hatColor = enemy.big ? "#320a17" : "#3d0f1d";
+    const step = Math.sin(enemy.phase * 1.6) * 3 * u;
     ctx.save();
     ctx.translate(enemy.x, enemy.y);
-    ctx.fillStyle = "#2b1622";
-    ctx.fillRect(-enemy.radius * 0.85, -enemy.radius * 1.15, enemy.radius * 1.7, enemy.radius * 0.38);
-    ctx.fillStyle = enemy.big ? "#df294b" : "#ff4d67";
+
+    ctx.fillStyle = "rgba(0,0,0,.28)";
     ctx.beginPath();
-    ctx.arc(0, 0, enemy.radius, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#601423";
-    ctx.fillRect(-enemy.radius * 1.05, -enemy.radius * 0.55, enemy.radius * 2.1, enemy.big ? 7 : 5);
-    ctx.fillStyle = "#172333";
-    ctx.fillRect(enemy.radius * 0.25, -3, enemy.big ? 34 : 25, enemy.big ? 9 : 6);
-    ctx.fillStyle = "#fff";
-    ctx.beginPath();
-    ctx.arc(-enemy.radius * 0.3, -enemy.radius * 0.15, enemy.big ? 3.5 : 2.5, 0, Math.PI * 2);
+    ctx.ellipse(0, 30 * u, 17 * u, 5 * u, 0, 0, Math.PI * 2);
     ctx.fill();
 
-    const width = enemy.radius * 2;
+    ctx.fillStyle = darkColor;
+    ctx.fillRect(-9 * u, 12 * u, 7 * u, 18 * u + step);
+    ctx.fillRect(2 * u, 12 * u, 7 * u, 18 * u - step);
+    ctx.fillStyle = "#241017";
+    ctx.fillRect(-11 * u, 28 * u + step, 9 * u, 5 * u);
+    ctx.fillRect(2 * u, 28 * u - step, 9 * u, 5 * u);
+
+    ctx.fillStyle = bodyColor;
+    roundRect(-13 * u, -8 * u, 26 * u, 24 * u, 8 * u);
+    ctx.fill();
+    ctx.fillStyle = darkColor;
+    roundRect(-13 * u, 4 * u, 26 * u, 12 * u, 6 * u);
+    ctx.fill();
+
+    ctx.fillStyle = bodyColor;
+    ctx.fillRect(-19 * u, -6 * u, 7 * u, 20 * u);
+    ctx.fillRect(12 * u, -6 * u, 7 * u, 16 * u);
+
+    ctx.fillStyle = "#1a232f";
+    ctx.save();
+    ctx.translate(15 * u, 10 * u);
+    ctx.rotate(0.15);
+    ctx.fillRect(0, -3 * u, 30 * u, 6 * u);
+    ctx.fillStyle = "#2f3d4d";
+    ctx.fillRect(20 * u, -2 * u, 12 * u, 3 * u);
+    ctx.fillRect(6 * u, 2 * u, 5 * u, 8 * u);
+    ctx.restore();
+
+    ctx.fillStyle = enemy.big ? "#e8a58c" : "#f0b79c";
+    ctx.beginPath();
+    ctx.arc(0, -15 * u, 9 * u, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = hatColor;
+    roundRect(-10 * u, -24 * u, 20 * u, 8 * u, 3 * u);
+    ctx.fill();
+    ctx.fillRect(-11 * u, -18 * u, 22 * u, 3 * u);
+    ctx.fillStyle = enemy.big ? "#ffd83d" : "#ffe27a";
+    ctx.beginPath();
+    ctx.arc(0, -20 * u, 2.4 * u, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.fillStyle = "#20140f";
+    ctx.beginPath();
+    ctx.arc(-3.4 * u, -14 * u, 1.5 * u, 0, Math.PI * 2);
+    ctx.arc(3.4 * u, -14 * u, 1.5 * u, 0, Math.PI * 2);
+    ctx.fill();
+
+    if (enemy.big) {
+      ctx.fillStyle = "#ffd83d";
+      ctx.font = "900 10px Microsoft JhengHei";
+      ctx.textAlign = "center";
+      ctx.fillText("巨人", 0, 2 * u);
+    }
+
+    const barWidth = 30 * u;
     ctx.fillStyle = "#35121a";
-    ctx.fillRect(-width / 2, -enemy.radius - 12, width, 5);
+    ctx.fillRect(-barWidth / 2, -34 * u, barWidth, 5);
     ctx.fillStyle = "#54e58d";
-    ctx.fillRect(-width / 2, -enemy.radius - 12, width * (enemy.hp / enemy.maxHp), 5);
+    ctx.fillRect(-barWidth / 2, -34 * u, barWidth * Math.max(0, enemy.hp / enemy.maxHp), 5);
     ctx.restore();
   });
 }
@@ -756,8 +806,105 @@ function clamp(value, min, max) {
   return Math.max(min, Math.min(max, value));
 }
 
+const musicButton = document.querySelector("#musicButton");
+let audioCtx = null;
+let masterGain = null;
+let musicEnabled = true;
+let musicTimer = 0;
+let nextNoteTime = 0;
+let melodyIndex = 0;
+const beatDur = 0.42;
+const NOTE = {
+  C4: 261.63, D4: 293.66, E4: 329.63, F4: 349.23, G4: 392.0, A4: 440.0, B4: 493.88,
+  C5: 523.25, D5: 587.33, E5: 659.25, F5: 698.46, G5: 783.99, A5: 880.0, R: 0
+};
+const melody = [
+  ["A4", 1], ["E5", 1], ["C5", 1], ["A4", 1], ["B4", 1], ["G4", 1], ["A4", 2],
+  ["E4", 1], ["A4", 1], ["C5", 1], ["B4", 1], ["A4", 1], ["G4", 1], ["E4", 2],
+  ["F4", 1], ["A4", 1], ["C5", 1], ["D5", 1], ["C5", 1], ["A4", 1], ["G4", 2],
+  ["E5", 1], ["D5", 1], ["C5", 1], ["B4", 1], ["A4", 1], ["B4", 1], ["A4", 2]
+];
+
+function ensureAudio() {
+  if (audioCtx) return;
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) return;
+  audioCtx = new AudioContextClass();
+  masterGain = audioCtx.createGain();
+  masterGain.gain.value = musicEnabled ? 0.5 : 0;
+  masterGain.connect(audioCtx.destination);
+}
+
+function playViolinNote(freq, start, dur) {
+  if (freq <= 0) return;
+  const osc1 = audioCtx.createOscillator();
+  osc1.type = "sawtooth";
+  osc1.frequency.value = freq;
+  const osc2 = audioCtx.createOscillator();
+  osc2.type = "triangle";
+  osc2.frequency.value = freq;
+  const filter = audioCtx.createBiquadFilter();
+  filter.type = "lowpass";
+  filter.frequency.value = 2400;
+  filter.Q.value = 0.8;
+  const gain = audioCtx.createGain();
+  gain.gain.setValueAtTime(0, start);
+  gain.gain.linearRampToValueAtTime(0.22, start + 0.07);
+  gain.gain.setValueAtTime(0.2, start + dur * 0.65);
+  gain.gain.linearRampToValueAtTime(0, start + dur);
+  const lfo = audioCtx.createOscillator();
+  lfo.frequency.value = 5.5;
+  const lfoGain = audioCtx.createGain();
+  lfoGain.gain.value = 5;
+  lfo.connect(lfoGain);
+  lfoGain.connect(osc1.detune);
+  lfoGain.connect(osc2.detune);
+  osc1.connect(filter);
+  osc2.connect(filter);
+  filter.connect(gain);
+  gain.connect(masterGain);
+  osc1.start(start);
+  osc2.start(start);
+  lfo.start(start);
+  osc1.stop(start + dur + 0.05);
+  osc2.stop(start + dur + 0.05);
+  lfo.stop(start + dur + 0.05);
+}
+
+function musicScheduler() {
+  if (!audioCtx) return;
+  while (nextNoteTime < audioCtx.currentTime + 0.25) {
+    const [name, beats] = melody[melodyIndex % melody.length];
+    const dur = beats * beatDur;
+    playViolinNote(NOTE[name], nextNoteTime, dur * 0.92);
+    nextNoteTime += dur;
+    melodyIndex += 1;
+  }
+}
+
+function startMusic() {
+  ensureAudio();
+  if (!audioCtx) return;
+  if (audioCtx.state === "suspended") audioCtx.resume();
+  if (musicTimer) return;
+  nextNoteTime = audioCtx.currentTime + 0.1;
+  musicScheduler();
+  musicTimer = setInterval(musicScheduler, 120);
+}
+
+function toggleMusic() {
+  musicEnabled = !musicEnabled;
+  musicButton.textContent = musicEnabled ? "♪" : "🔇";
+  musicButton.setAttribute("aria-pressed", String(musicEnabled));
+  if (masterGain && audioCtx) {
+    masterGain.gain.setTargetAtTime(musicEnabled ? 0.5 : 0, audioCtx.currentTime, 0.05);
+  }
+  if (musicEnabled) startMusic();
+}
+
 startButton.addEventListener("click", startGame);
 pauseButton.addEventListener("click", togglePause);
+musicButton.addEventListener("click", toggleMusic);
 ui.weaponButton.addEventListener("click", equipNextWeapon);
 document.querySelector("#rulesButton").addEventListener("click", () => rulesDialog.showModal());
 document.querySelector("#closeRules").addEventListener("click", () => rulesDialog.close());
