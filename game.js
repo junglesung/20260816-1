@@ -12,8 +12,8 @@ const ui = {
   squad: document.querySelector("#squadValue"),
   coins: document.querySelector("#coinValue"),
   speed: document.querySelector("#speedValue"),
-  energy: document.querySelector("#energyValue"),
-  energyMeter: document.querySelector("#energyMeter"),
+  enemySpeed: document.querySelector("#enemySpeedValue"),
+  enemyMeter: document.querySelector("#enemySpeedMeter"),
   weaponName: document.querySelector("#weaponName"),
   weaponButton: document.querySelector("#weaponButton")
 };
@@ -57,7 +57,8 @@ function makeGame(level = 1, coins = loadCoins()) {
       { type: "speed", side: "right", progress: 0, goal: 600, open: false }
     ],
     speedLevel: 0,
-    energy: 0,
+    enemySpeedLevel: 0,
+    enemySpeedTimer: 0,
     weaponIndex: 0,
     lastShot: 0,
     spawnTimer: 0,
@@ -148,8 +149,14 @@ function loop(now) {
 
 function update(dt, now) {
   game.elapsed += dt;
+  game.enemySpeedTimer += dt;
+  if (game.enemySpeedLevel < 8 && game.enemySpeedTimer >= 6) {
+    game.enemySpeedTimer = 0;
+    game.enemySpeedLevel += 1;
+    floatingNotice(`敵軍加速！Lv ${game.enemySpeedLevel}`, "#ff8a5c");
+    updateHud();
+  }
   updatePlayer(dt);
-  updateGateBonuses();
   spawnEnemies(dt);
   shoot(now);
   updateBullets(dt);
@@ -161,6 +168,10 @@ function update(dt, now) {
   if (game.spawned >= game.enemyTotal && game.enemies.length === 0 && !game.over) {
     completeLevel();
   }
+}
+
+function enemySpeedMultiplier() {
+  return 1 + game.enemySpeedLevel * 0.12;
 }
 
 function updatePlayer(dt) {
@@ -232,6 +243,14 @@ function updateBullets(dt) {
       continue;
     }
 
+    const gate = gateAtPoint(bullet.x, bullet.y);
+    if (gate && !gate.open) {
+      openGate(gate);
+      burst(bullet.x, bullet.y, gate.type === "member" ? "#45d8ff" : "#ffe451", 6);
+      game.bullets.splice(i, 1);
+      continue;
+    }
+
     let hit = false;
     for (let e = game.enemies.length - 1; e >= 0; e -= 1) {
       const enemy = game.enemies[e];
@@ -249,25 +268,27 @@ function updateBullets(dt) {
 
 function updateEnemies(dt) {
   const gapHalf = Math.min(105, view.width * 0.18);
+  const mul = enemySpeedMultiplier();
   for (let i = game.enemies.length - 1; i >= 0; i -= 1) {
     const enemy = game.enemies[i];
     enemy.phase += dt * 2.2;
     const nearWall = [view.height * 0.34, view.height * 0.59].some((wallY) => Math.abs(enemy.y - wallY) < 42);
     if (nearWall && Math.abs(enemy.x - view.width / 2) > gapHalf - enemy.radius) {
-      enemy.x += Math.sign(view.width / 2 - enemy.x) * enemy.speed * 1.65 * dt;
+      enemy.x += Math.sign(view.width / 2 - enemy.x) * enemy.speed * 1.65 * mul * dt;
     } else {
-      enemy.y += enemy.speed * dt;
+      enemy.y += enemy.speed * mul * dt;
       enemy.x += Math.sin(enemy.phase) * 8 * dt;
     }
 
     enemy.shootTimer -= dt * 1000;
     if (enemy.shootTimer <= 0 && enemy.y > 20 && enemy.y < view.height * 0.72) {
       const angle = Math.atan2(game.player.y - enemy.y, game.player.x - enemy.x);
+      const bulletSpeed = (enemy.big ? 155 : 175) * mul;
       game.enemyBullets.push({
         x: enemy.x,
         y: enemy.y + enemy.radius,
-        vx: Math.cos(angle) * (enemy.big ? 155 : 175),
-        vy: Math.sin(angle) * (enemy.big ? 155 : 175),
+        vx: Math.cos(angle) * bulletSpeed,
+        vy: Math.sin(angle) * bulletSpeed,
         radius: enemy.big ? 5 : 4,
         damage: 1
       });
@@ -311,11 +332,8 @@ function updatePickups(dt) {
     pickup.phase += dt * 4;
     pickup.x += Math.sin(pickup.phase) * 15 * dt;
     if (distance(pickup, game.player) < pickup.radius + game.player.radius + 8) {
-      game.energy = Math.min(100, game.energy + 10);
-      burst(pickup.x, pickup.y, "#45d8ff", 12);
+      collectPickup(pickup);
       game.pickups.splice(i, 1);
-      if (game.energy >= 100) transformSquad();
-      updateHud();
     } else if (pickup.y > view.height + 20) {
       game.pickups.splice(i, 1);
     }
@@ -343,15 +361,12 @@ function hitBarrier(x, y, radius) {
   });
 }
 
-function updateGateBonuses() {
+function gateAtPoint(x, y) {
   const gateY = view.height * 0.64;
   const size = Math.min(86, view.width * 0.14);
-  game.gates.forEach((gate) => {
-    if (gate.open) return;
+  return game.gates.find((gate) => {
     const gateX = gate.side === "left" ? size * 0.62 : view.width - size * 0.62;
-    if (Math.hypot(game.player.x - gateX, game.player.y - gateY) < size * 0.95) {
-      openGate(gate);
-    }
+    return Math.abs(x - gateX) < size * 0.52 && Math.abs(y - gateY) < 36;
   });
 }
 
@@ -370,9 +385,26 @@ function openGate(gate) {
 function defeatEnemy(index, enemy) {
   game.enemies.splice(index, 1);
   burst(enemy.x, enemy.y, "#ff536d", enemy.big ? 22 : 10);
-  if (Math.random() < (enemy.big ? 0.8 : 0.28)) {
-    game.pickups.push({ x: enemy.x, y: enemy.y, radius: 9, phase: random(0, 6) });
+  if (enemy.big) {
+    game.pickups.push({ x: enemy.x, y: enemy.y, radius: 13, phase: random(0, 6), type: "heal" });
+  } else if (Math.random() < 0.5) {
+    game.pickups.push({ x: enemy.x, y: enemy.y, radius: 11, phase: random(0, 6), type: "firerate" });
   }
+}
+
+function collectPickup(pickup) {
+  if (pickup.type === "heal") {
+    game.squad.forEach((member) => {
+      member.hp = member.maxHp;
+    });
+    burst(pickup.x, pickup.y, "#ffd83d", 16);
+    floatingNotice("補血！全隊回滿", "#ff9ad2");
+  } else {
+    game.speedLevel = Math.min(10, game.speedLevel + 1);
+    burst(pickup.x, pickup.y, "#ffe45d", 14);
+    floatingNotice(`加砲速度！射速 ${(1 + game.speedLevel * 0.15).toFixed(2)} 倍`, "#ffe45d");
+  }
+  updateHud();
 }
 
 function damageSquad(amount) {
@@ -386,16 +418,6 @@ function damageSquad(amount) {
   }
   updateHud();
   if (game.squad.length === 0) endGame();
-}
-
-function transformSquad() {
-  game.energy = 0;
-  const member = game.squad[0];
-  member.hp = 1111;
-  member.maxHp = 1111;
-  member.big = true;
-  game.player.radius = 27;
-  floatingNotice("大型藍色巨人登場！1111 生命", "#63e8ff");
 }
 
 function completeLevel() {
@@ -452,8 +474,8 @@ function updateHud() {
   ui.squad.textContent = game.squad.length;
   ui.coins.textContent = game.coins;
   ui.speed.textContent = `${(1 + game.speedLevel * 0.15).toFixed(2)}×`;
-  ui.energy.textContent = game.energy;
-  ui.energyMeter.style.width = `${game.energy}%`;
+  ui.enemySpeed.textContent = `Lv ${game.enemySpeedLevel}`;
+  ui.enemyMeter.style.width = `${(game.enemySpeedLevel / 8) * 100}%`;
   ui.weaponName.textContent = weapons[game.weaponIndex].name;
 
   const unlocked = weapons.filter((weapon) => game.level >= weapon.unlock);
@@ -550,7 +572,7 @@ function drawGates() {
     ctx.font = `900 ${Math.max(13, size * 0.2)}px Microsoft JhengHei`;
     ctx.fillText(gate.open ? "已領取" : gate.type === "member" ? "+1 人" : "射速", 0, -8);
     ctx.font = "800 11px Microsoft JhengHei";
-    ctx.fillText(gate.open ? "完成" : "靠近直接領取", 0, 14);
+    ctx.fillText(gate.open ? "完成" : "打子彈領取", 0, 14);
     if (!gate.open) {
       ctx.fillStyle = color;
       ctx.beginPath();
@@ -720,20 +742,57 @@ function drawBullets() {
   ctx.shadowBlur = 0;
 }
 
+const rainbowStops = ["#ff536d", "#ffcc32", "#42e695", "#43c6ff", "#ac75ff"];
+
 function drawPickups() {
   game.pickups.forEach((pickup) => {
-    ctx.shadowBlur = 18;
-    ctx.shadowColor = "#3de8ff";
-    ctx.fillStyle = "#45dfff";
-    ctx.beginPath();
-    ctx.arc(pickup.x, pickup.y, pickup.radius, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#e9fdff";
-    ctx.font = "900 9px Microsoft JhengHei";
-    ctx.textAlign = "center";
-    ctx.fillText("+10", pickup.x, pickup.y + 3);
+    if (pickup.type === "heal") {
+      const spin = pickup.phase;
+      ctx.save();
+      ctx.translate(pickup.x, pickup.y);
+      ctx.rotate(spin);
+      const gradient = ctx.createLinearGradient(-pickup.radius, -pickup.radius, pickup.radius, pickup.radius);
+      rainbowStops.forEach((color, index) => gradient.addColorStop(index / (rainbowStops.length - 1), color));
+      ctx.shadowBlur = 16;
+      ctx.shadowColor = "#ff9ad2";
+      ctx.fillStyle = gradient;
+      drawStar(0, 0, 5, pickup.radius + 3, pickup.radius * 0.5);
+      ctx.fill();
+      ctx.restore();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = "#4a0f22";
+      ctx.font = "900 10px Microsoft JhengHei";
+      ctx.textAlign = "center";
+      ctx.fillText("補", pickup.x, pickup.y + 3.5);
+    } else {
+      ctx.shadowBlur = 16;
+      ctx.shadowColor = "#ffe45d";
+      ctx.fillStyle = "#ffe14c";
+      ctx.beginPath();
+      ctx.arc(pickup.x, pickup.y, pickup.radius, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = "#5a4300";
+      ctx.font = "900 8px Microsoft JhengHei";
+      ctx.textAlign = "center";
+      ctx.fillText("砲速", pickup.x, pickup.y + 3);
+    }
   });
   ctx.shadowBlur = 0;
+}
+
+function drawStar(cx, cy, spikes, outer, inner) {
+  let rot = -Math.PI / 2;
+  const step = Math.PI / spikes;
+  ctx.beginPath();
+  ctx.moveTo(cx, cy - outer);
+  for (let i = 0; i < spikes; i += 1) {
+    ctx.lineTo(cx + Math.cos(rot) * outer, cy + Math.sin(rot) * outer);
+    rot += step;
+    ctx.lineTo(cx + Math.cos(rot) * inner, cy + Math.sin(rot) * inner);
+    rot += step;
+  }
+  ctx.closePath();
 }
 
 function drawParticles() {

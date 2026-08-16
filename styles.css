@@ -414,6 +414,11 @@ h1 {
   transition: width .2s;
 }
 
+.enemy-meter i {
+  background: linear-gradient(90deg, #ff6a3d, #ff3f5f);
+  box-shadow: 0 0 12px var(--red);
+}
+
 .game-wrap {
   position: relative;
   width: min(1100px, 100%);
