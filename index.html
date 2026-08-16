@@ -10,7 +10,7 @@
 <body>
   <main class="app">
     <section id="startScreen" class="start-screen" aria-labelledby="gameTitle">
-      <p id="updateStamp" class="update-stamp" aria-label="程式更新時間">更新時間：2026/08/16 17:15</p>
+      <p id="updateStamp" class="update-stamp" aria-label="程式更新時間">更新時間：2026/08/16 17:39</p>
       <div class="hero-card">
         <p class="eyebrow">小隊射擊闖關遊戲</p>
         <h1 id="gameTitle">
@@ -33,23 +33,34 @@
           </div>
         </div>
 
+        <div class="progress-row">
+          <div><span>目前關卡</span><strong id="homeLevel">1</strong></div>
+          <div><span>累積分數</span><strong id="homeScore">0</strong></div>
+          <div><span>收集星星</span><strong id="homeStars">0</strong></div>
+        </div>
+
         <section class="rules-card" aria-labelledby="rulesTitle">
           <h2 id="rulesTitle" class="rainbow-text">遊戲規則</h2>
           <ul>
-            <li><span>🎯</span> 自動射擊，左右移動閃避敵軍子彈。</li>
-            <li><span>🚪</span> 子彈打到左右獎勵門就立即領取增員或射速。</li>
-            <li><span>⚡</span> 敵我雙方都會一階一階變快，射速最高 2.5 倍。</li>
-            <li><span>🌈</span> 打倒大巨人掉落星星彩虹補血；打倒小兵掉落加砲速度。</li>
-            <li><span>🔫</span> 每過 10 關解鎖更強武器；裝備一次花費 10 金幣。</li>
-            <li><span>🏆</span> 敵軍中一發就倒；每名藍隊員可承受 1111 發子彈。</li>
+            <li><span>🧱</span> 左右兩道城牆擋住子彈，我們也進不去。</li>
+            <li><span>🎁</span> 左牆送出加一人、右牆送出補血、中間送出加射速，速度 2.5 倍且只有我們吃得到。</li>
+            <li><span>🛡️</span> 大巨人有 500 滴盾牌，打破盾牌後才會露出持槍的人。</li>
+            <li><span>⭐</span> 打爆小兵得 5 分掉小星星（1 顆）；打爆大人得 10 分掉大星星（5 顆）。</li>
+            <li><span>🔫</span> 每過一關輪流獲得新槍與新子彈，可在武器庫查看與裝備。</li>
+            <li><span>🏁</span> 第 10 關全是大巨人，通過即獲得最終勝利。</li>
           </ul>
-          <p class="tip">兩道防彈牆只有中央通道可以通過：小兵一次最多 10 人，大兵一次只能 1 人！</p>
+          <p class="tip">操作：左右按鈕移動、向後撤退；隊伍會自動開火。</p>
         </section>
 
         <button id="startButton" class="rainbow-button" type="button">
-          <span>開始遊戲</span>
+          <span id="startButtonText">開始遊戲</span>
           <small>準備迎戰紅色軍團！</small>
         </button>
+
+        <div class="home-actions">
+          <button id="arsenalButton" class="ghost-button" type="button">🔫 武器庫</button>
+          <button id="resetButton" class="ghost-button" type="button">🔄 從第一關重來</button>
+        </div>
       </div>
     </section>
 
@@ -63,25 +74,27 @@
         <div class="stats">
           <span>關卡 <strong id="levelValue">1</strong></span>
           <span>隊員 <strong id="squadValue">1</strong></span>
-          <span>金幣 <strong id="coinValue">0</strong></span>
-          <span>射速 <strong id="speedValue">1.0×</strong></span>
+          <span>分數 <strong id="scoreValue">0</strong></span>
+          <span>星星 <strong id="starValue">0</strong></span>
+          <span>射速 <strong id="speedValue">1.00×</strong></span>
         </div>
       </header>
 
       <div class="weapon-bar">
-        <div>
-          <span class="label">目前武器</span>
-          <strong id="weaponName">練習手槍</strong>
+        <div class="weapon-slot">
+          <span class="label">目前槍械</span>
+          <strong id="gunName">練習手槍</strong>
         </div>
-        <div class="energy-wrap">
-          <span>敵軍速度 <strong id="enemySpeedValue">Lv 0</strong></span>
-          <div class="meter enemy-meter"><i id="enemySpeedMeter"></i></div>
+        <div class="weapon-slot">
+          <span class="label">目前子彈</span>
+          <strong id="ammoName">普通子彈</strong>
         </div>
-        <button id="weaponButton" type="button" disabled>下一把槍尚未解鎖</button>
+        <button id="openArsenal" type="button">武器庫</button>
       </div>
 
       <div id="gameWrap" class="game-wrap">
         <canvas id="gameCanvas" aria-label="藍色小隊射擊遊戲"></canvas>
+        <div id="praiseLayer" class="praise-layer" aria-hidden="true"></div>
         <div id="message" class="game-message" hidden></div>
         <button id="pauseButton" class="pause-button" type="button" aria-label="暫停遊戲">Ⅱ</button>
       </div>
@@ -101,10 +114,18 @@
     </section>
 
     <dialog id="rulesDialog">
-      <button id="closeRules" class="dialog-close" type="button" aria-label="關閉規則">×</button>
+      <button class="dialog-close" type="button" data-close="rulesDialog" aria-label="關閉規則">×</button>
       <h2 class="rainbow-text">遊戲規則</h2>
       <p>左右移動藍色小隊、向後撤退閃避。隊伍會自動射擊，消滅所有紅色敵軍即可過關。</p>
-      <p>敵方子彈會傷害其中一名隊員；隊員生命歸零就會離隊。隊伍全滅則挑戰失敗。</p>
+      <p>左右城牆會送出加一人與補血，中間送出加射速，這些補給只有我們吃得到。</p>
+      <p>大巨人要先打破 500 滴盾牌才會露出持槍的人；打爆小兵 5 分、大人 10 分。</p>
+    </dialog>
+
+    <dialog id="arsenalDialog">
+      <button class="dialog-close" type="button" data-close="arsenalDialog" aria-label="關閉武器庫">×</button>
+      <h2 class="rainbow-text">武器庫</h2>
+      <p class="arsenal-hint">每過一關輪流獲得新槍與新子彈，點擊已取得的項目即可裝備。</p>
+      <div id="arsenalBody" class="arsenal-body"></div>
     </dialog>
   </main>
 

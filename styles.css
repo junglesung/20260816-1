@@ -250,6 +250,53 @@ h1 {
   text-align: center;
 }
 
+.progress-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 10px;
+  margin: 0 0 18px;
+}
+
+.progress-row div {
+  padding: 10px 6px;
+  border: 1px solid #ffffff1f;
+  border-radius: 14px;
+  background: #05112799;
+}
+
+.progress-row span {
+  display: block;
+  color: var(--muted);
+  font-size: .74rem;
+}
+
+.progress-row strong {
+  color: var(--yellow);
+  font-size: 1.35rem;
+}
+
+.home-actions {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.ghost-button {
+  padding: 10px 16px;
+  border: 1px solid #ffffff3d;
+  border-radius: 12px;
+  background: #0d224099;
+  color: #d7e6f7;
+  cursor: pointer;
+  font-size: .84rem;
+  font-weight: 800;
+}
+
+.ghost-button:hover {
+  background: #16355f;
+}
+
 .rainbow-button {
   position: relative;
   width: min(360px, 100%);
@@ -376,6 +423,112 @@ h1 {
   color: var(--muted);
 }
 
+.weapon-slot {
+  min-width: 0;
+}
+
+.weapon-slot strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.praise-layer {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+.praise-layer span {
+  position: absolute;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: linear-gradient(100deg, #ff496d, #ffce3c, #41e5a1, #42baff, #a46cff);
+  color: #06162d;
+  font-weight: 1000;
+  opacity: 0;
+  animation: praise-pop 1.9s ease-in-out infinite;
+}
+
+@keyframes praise-pop {
+  0% { opacity: 0; transform: scale(.5) rotate(-12deg) }
+  35% { opacity: 1; transform: scale(1.08) rotate(6deg) }
+  70% { opacity: 1; transform: scale(1) rotate(-4deg) }
+  100% { opacity: 0; transform: scale(.6) rotate(8deg) }
+}
+
+.arsenal-hint {
+  margin-top: 0;
+  color: var(--muted);
+  font-size: .84rem;
+}
+
+.arsenal-body h3 {
+  margin: 16px 0 8px;
+  color: var(--blue-light);
+  font-size: 1rem;
+}
+
+.arsenal-list {
+  display: grid;
+  gap: 8px;
+}
+
+.arsenal-item {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 2px 12px;
+  padding: 10px 14px;
+  border: 1px solid #ffffff26;
+  border-radius: 12px;
+  background: #0b1e3a;
+  color: #eaf3ff;
+  cursor: pointer;
+  text-align: left;
+}
+
+.arsenal-item:hover:not(:disabled) {
+  border-color: var(--blue);
+  background: #12315a;
+}
+
+.arsenal-item.equipped {
+  border-color: var(--yellow);
+  background: #1b2f4d;
+}
+
+.arsenal-item.locked {
+  opacity: .5;
+  cursor: default;
+}
+
+.arsenal-name {
+  font-weight: 900;
+}
+
+.arsenal-dots {
+  color: var(--yellow);
+  letter-spacing: .12em;
+}
+
+.arsenal-detail {
+  color: var(--muted);
+  font-size: .78rem;
+}
+
+.arsenal-badge {
+  position: absolute;
+  right: 12px;
+  bottom: 8px;
+  color: var(--yellow);
+  font-size: .72rem;
+  font-weight: 900;
+}
+
 .weapon-bar button {
   padding: 8px 12px;
   border: 0;
@@ -391,32 +544,6 @@ h1 {
   background: #263e5d;
   color: #7f96af;
   cursor: default;
-}
-
-.energy-wrap {
-  width: min(240px, 32%);
-}
-
-.meter {
-  height: 7px;
-  margin-top: 4px;
-  overflow: hidden;
-  border-radius: 5px;
-  background: #06142b;
-}
-
-.meter i {
-  display: block;
-  width: 0%;
-  height: 100%;
-  background: linear-gradient(90deg, var(--blue), #69eeff);
-  box-shadow: 0 0 12px var(--blue);
-  transition: width .2s;
-}
-
-.enemy-meter i {
-  background: linear-gradient(90deg, #ff6a3d, #ff3f5f);
-  box-shadow: 0 0 12px var(--red);
 }
 
 .game-wrap {
@@ -638,14 +765,26 @@ dialog p {
 
   .weapon-bar {
     flex-wrap: wrap;
-  }
-
-  .energy-wrap {
-    width: 44%;
+    gap: 6px 12px;
+    font-size: .76rem;
   }
 
   .weapon-bar button {
     width: 100%;
+  }
+
+  .stats {
+    flex-wrap: wrap;
+    gap: 4px 12px;
+    font-size: .78rem;
+  }
+
+  .progress-row strong {
+    font-size: 1.1rem;
+  }
+
+  .home-actions {
+    flex-direction: column;
   }
 
   .game-wrap {
