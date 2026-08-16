@@ -45,7 +45,7 @@ function makeGame(level = 1, coins = loadCoins()) {
   return {
     level,
     coins,
-    squad: [{ hp: 100, maxHp: 100 }],
+    squad: [{ hp: 1111, maxHp: 1111, big: false }],
     player: { x: view.width / 2, y: view.height - 60, radius: 18 },
     bullets: [],
     enemyBullets: [],
@@ -67,8 +67,7 @@ function makeGame(level = 1, coins = loadCoins()) {
     paused: false,
     over: false,
     betweenLevels: false,
-    elapsed: 0,
-    screenShake: 0
+    elapsed: 0
   };
 }
 
@@ -86,8 +85,7 @@ function startGame() {
 }
 
 function beginLevel() {
-  const bigCount = game.level >= 3 ? Math.floor(game.level / 3) : 0;
-  game.enemyTotal = Math.min(5 + game.level * 2, 30) + bigCount;
+  game.enemyTotal = Math.min(7 + game.level * 2, 32);
   game.spawned = 0;
   game.spawnTimer = 250;
   game.enemies.length = 0;
@@ -151,6 +149,7 @@ function loop(now) {
 function update(dt, now) {
   game.elapsed += dt;
   updatePlayer(dt);
+  updateGateBonuses();
   spawnEnemies(dt);
   shoot(now);
   updateBullets(dt);
@@ -158,7 +157,6 @@ function update(dt, now) {
   updateEnemyBullets(dt);
   updatePickups(dt);
   updateParticles(dt);
-  game.screenShake = Math.max(0, game.screenShake - dt * 18);
 
   if (game.spawned >= game.enemyTotal && game.enemies.length === 0 && !game.over) {
     completeLevel();
@@ -183,10 +181,10 @@ function spawnEnemies(dt) {
   game.spawnTimer -= dt * 1000;
   if (game.spawnTimer > 0) return;
 
-  const shouldBeBig = game.level >= 3 && game.spawned > 0 && game.spawned % Math.max(4, 8 - Math.floor(game.level / 5)) === 0;
+  const shouldBeBig = game.spawned === 0 || game.spawned % 4 === 0;
   const big = shouldBeBig;
-  const radius = big ? 27 : 16;
-  const hp = big ? 500 : 100;
+  const radius = big ? 34 : 16;
+  const hp = 1;
   const laneSpread = Math.min(210, view.width * 0.27);
   game.enemies.push({
     x: view.width / 2 + random(-laneSpread, laneSpread),
@@ -234,24 +232,14 @@ function updateBullets(dt) {
       continue;
     }
 
-    const gate = gateAtPoint(bullet.x, bullet.y);
-    if (gate && !gate.open) {
-      gate.progress = Math.min(gate.goal, gate.progress + 10);
-      burst(bullet.x, bullet.y, gate.type === "member" ? "#45d8ff" : "#ffe451", 3);
-      game.bullets.splice(i, 1);
-      if (gate.progress >= gate.goal) openGate(gate);
-      continue;
-    }
-
     let hit = false;
     for (let e = game.enemies.length - 1; e >= 0; e -= 1) {
       const enemy = game.enemies[e];
       if (distance(bullet, enemy) < bullet.radius + enemy.radius) {
-        enemy.hp -= bullet.damage;
         burst(bullet.x, bullet.y, bullet.color, 4);
         game.bullets.splice(i, 1);
         hit = true;
-        if (enemy.hp <= 0) defeatEnemy(e, enemy);
+        defeatEnemy(e, enemy);
         break;
       }
     }
@@ -281,14 +269,14 @@ function updateEnemies(dt) {
         vx: Math.cos(angle) * (enemy.big ? 155 : 175),
         vy: Math.sin(angle) * (enemy.big ? 155 : 175),
         radius: enemy.big ? 5 : 4,
-        damage: enemy.big ? 2 : 1
+        damage: 1
       });
       enemy.shootTimer = random(enemy.big ? 900 : 1250, enemy.big ? 1450 : 1900);
     }
 
     if (distance(enemy, game.player) < enemy.radius + game.player.radius + 4 || enemy.y > view.height + 30) {
       game.enemies.splice(i, 1);
-      damageSquad(enemy.big ? 35 : 18);
+      damageSquad(1);
     }
   }
 }
@@ -355,20 +343,22 @@ function hitBarrier(x, y, radius) {
   });
 }
 
-function gateAtPoint(x, y) {
+function updateGateBonuses() {
   const gateY = view.height * 0.64;
   const size = Math.min(86, view.width * 0.14);
-  return game.gates.find((gate) => {
+  game.gates.forEach((gate) => {
+    if (gate.open) return;
     const gateX = gate.side === "left" ? size * 0.62 : view.width - size * 0.62;
-    return Math.abs(x - gateX) < size * 0.52 && Math.abs(y - gateY) < 36;
+    if (Math.hypot(game.player.x - gateX, game.player.y - gateY) < size * 0.95) {
+      openGate(gate);
+    }
   });
 }
 
 function openGate(gate) {
   gate.open = true;
-  game.screenShake = 6;
   if (gate.type === "member") {
-    game.squad.push({ hp: 100, maxHp: 100 });
+    game.squad.push({ hp: 1111, maxHp: 1111, big: false });
     floatingNotice("增員 +1！", "#58e6ff");
   } else {
     game.speedLevel = Math.min(10, game.speedLevel + 1);
@@ -379,7 +369,6 @@ function openGate(gate) {
 
 function defeatEnemy(index, enemy) {
   game.enemies.splice(index, 1);
-  game.screenShake = enemy.big ? 8 : 3;
   burst(enemy.x, enemy.y, "#ff536d", enemy.big ? 22 : 10);
   if (Math.random() < (enemy.big ? 0.8 : 0.28)) {
     game.pickups.push({ x: enemy.x, y: enemy.y, radius: 9, phase: random(0, 6) });
@@ -390,7 +379,6 @@ function damageSquad(amount) {
   if (game.over || game.squad.length === 0) return;
   const member = game.squad[game.squad.length - 1];
   member.hp -= amount;
-  game.screenShake = 10;
   burst(game.player.x, game.player.y, "#ff536d", 10);
   if (member.hp <= 0) {
     game.squad.pop();
@@ -403,10 +391,11 @@ function damageSquad(amount) {
 function transformSquad() {
   game.energy = 0;
   const member = game.squad[0];
-  member.hp = 500;
-  member.maxHp = 500;
+  member.hp = 1111;
+  member.maxHp = 1111;
+  member.big = true;
   game.player.radius = 27;
-  floatingNotice("大型藍色隊員登場！500 生命", "#63e8ff");
+  floatingNotice("大型藍色巨人登場！1111 生命", "#63e8ff");
 }
 
 function completeLevel() {
@@ -483,9 +472,6 @@ function updateHud() {
 function draw() {
   if (!game) return;
   ctx.save();
-  if (game.screenShake > 0) {
-    ctx.translate(random(-game.screenShake, game.screenShake), random(-game.screenShake, game.screenShake));
-  }
   drawArena();
   drawGates();
   drawPickups();
@@ -562,13 +548,18 @@ function drawGates() {
     ctx.fillStyle = color;
     ctx.textAlign = "center";
     ctx.font = `900 ${Math.max(13, size * 0.2)}px Microsoft JhengHei`;
-    ctx.fillText(gate.open ? "已開啟" : gate.type === "member" ? "+1 人" : "射速", 0, -8);
+    ctx.fillText(gate.open ? "已領取" : gate.type === "member" ? "+1 人" : "射速", 0, -8);
     ctx.font = "800 11px Microsoft JhengHei";
-    ctx.fillText(gate.open ? "完成" : `${gate.progress}/${gate.goal} 發`, 0, 14);
-    ctx.fillStyle = "#061522";
-    ctx.fillRect(-size * 0.38, 23, size * 0.76, 5);
-    ctx.fillStyle = color;
-    ctx.fillRect(-size * 0.38, 23, size * 0.76 * (gate.progress / gate.goal), 5);
+    ctx.fillText(gate.open ? "完成" : "靠近直接領取", 0, 14);
+    if (!gate.open) {
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(0, 31);
+      ctx.lineTo(-7, 24);
+      ctx.lineTo(7, 24);
+      ctx.closePath();
+      ctx.fill();
+    }
     ctx.restore();
   });
 }
@@ -660,21 +651,41 @@ function drawSquad() {
     const offsetX = (column - (rowCount - 1) / 2) * 18;
     const offsetY = row * 15;
     const member = game.squad[Math.min(i, count - 1)];
-    const big = member.maxHp === 500;
+    const big = member.big;
     const radius = big ? 24 : 13;
     const x = game.player.x + offsetX;
     const y = game.player.y + offsetY;
+    const u = radius / 13;
 
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.fillStyle = "#073e73";
+    ctx.fillRect(-7 * u, 6 * u, 5 * u, 15 * u);
+    ctx.fillRect(2 * u, 6 * u, 5 * u, 15 * u);
+    ctx.fillStyle = "#071e36";
+    ctx.fillRect(-8 * u, 19 * u, 7 * u, 4 * u);
+    ctx.fillRect(1 * u, 19 * u, 7 * u, 4 * u);
     ctx.fillStyle = big ? "#45dfff" : "#159ef2";
-    ctx.beginPath();
-    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    roundRect(-10 * u, -9 * u, 20 * u, 19 * u, 5 * u);
     ctx.fill();
-    ctx.fillStyle = "#06325b";
-    ctx.fillRect(x - radius * 0.9, y - 4, radius * 1.8, big ? 7 : 5);
-    ctx.fillStyle = "#d9f8ff";
+    ctx.fillRect(-15 * u, -6 * u, 5 * u, 15 * u);
+    ctx.fillRect(10 * u, -6 * u, 5 * u, 13 * u);
+    ctx.fillStyle = "#10283d";
+    ctx.fillRect(9 * u, 3 * u, 25 * u, 5 * u);
+    ctx.fillStyle = "#f1c4a4";
     ctx.beginPath();
-    ctx.arc(x - radius * 0.3, y - radius * 0.18, big ? 3 : 2, 0, Math.PI * 2);
+    ctx.arc(0, -15 * u, 7 * u, 0, Math.PI * 2);
     ctx.fill();
+    ctx.fillStyle = "#07549a";
+    roundRect(-8 * u, -22 * u, 16 * u, 6 * u, 2 * u);
+    ctx.fill();
+    ctx.fillRect(-9 * u, -17 * u, 18 * u, 2 * u);
+    ctx.fillStyle = "#17212d";
+    ctx.beginPath();
+    ctx.arc(-2.5 * u, -14 * u, 1.1 * u, 0, Math.PI * 2);
+    ctx.arc(2.5 * u, -14 * u, 1.1 * u, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
   }
 
   const active = game.squad[game.squad.length - 1];
