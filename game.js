@@ -263,6 +263,10 @@ function dispenserSpot(dispenser, bounds) {
   return { x: view.width / 2, y: view.height * 0.11 };
 }
 
+function enemyLevelScale() {
+  return game.level;
+}
+
 function spawnEnemies(dt) {
   if (game.spawned >= game.enemyTotal) return;
   game.spawnTimer -= dt * 1000;
@@ -272,15 +276,18 @@ function spawnEnemies(dt) {
   const allBig = game.level >= MAX_LEVEL;
   const big = allBig || game.spawned === 0 || game.spawned % 4 === 0;
   const radius = big ? 34 : 16;
+  const scale = enemyLevelScale();
+  const hp = (big ? 100 : 1) * scale;
+  const shield = (big ? 500 : 0) * scale;
   game.enemies.push({
     x: random(bounds.innerLeft + 40, bounds.innerRight - 40),
     y: -radius - random(0, 50),
     radius,
     big,
-    hp: big ? 100 : 1,
-    maxHp: big ? 100 : 1,
-    shield: big ? 500 : 0,
-    shieldMax: big ? 500 : 0,
+    hp,
+    maxHp: hp,
+    shield,
+    shieldMax: shield,
     speed: big ? 30 : 42,
     shootTimer: random(900, 1800),
     phase: random(0, Math.PI * 2)
@@ -363,7 +370,7 @@ function updateEnemies(dt) {
       enemy.shootTimer -= dt * 1000;
       if (enemy.shootTimer <= 0 && enemy.y > 20 && enemy.y < view.height * 0.72) {
         const angle = Math.atan2(game.player.y - enemy.y, game.player.x - enemy.x);
-        const bulletSpeed = 185;
+        const bulletSpeed = 185 * enemyLevelScale();
         game.enemyBullets.push({
           x: enemy.x,
           y: enemy.y + enemy.radius,
