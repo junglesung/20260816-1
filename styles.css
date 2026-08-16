@@ -52,10 +52,29 @@ button:focus-visible {
 }
 
 .start-screen {
+  position: relative;
   display: grid;
   min-height: 100dvh;
   place-items: center;
   padding: clamp(18px, 4vw, 48px);
+}
+
+.update-stamp {
+  position: absolute;
+  top: max(10px, env(safe-area-inset-top));
+  right: max(10px, env(safe-area-inset-right));
+  z-index: 2;
+  margin: 0;
+  padding: 6px 10px;
+  border: 1px solid #ffffff2e;
+  border-radius: 999px;
+  background: #07162de8;
+  color: #c6daf0;
+  font-size: clamp(.68rem, 2.4vw, .82rem);
+  font-weight: 700;
+  letter-spacing: .02em;
+  white-space: nowrap;
+  pointer-events: none;
 }
 
 .hero-card {
@@ -525,6 +544,13 @@ dialog p {
 @media (max-width: 680px) {
   .start-screen {
     padding: 12px;
+    padding-top: 44px;
+  }
+
+  .update-stamp {
+    top: 8px;
+    right: 8px;
+    padding: 5px 8px;
   }
 
   .hero-card {
