@@ -566,6 +566,10 @@ function startGame(chapter, subLevel) {
   lastFrame = performance.now();
   cancelAnimationFrame(animationId);
   animationId = requestAnimationFrame(loop);
+  requestAnimationFrame(() => {
+    resizeCanvas();
+    requestAnimationFrame(resizeCanvas);
+  });
 }
 
 function beginLevel() {
@@ -619,19 +623,29 @@ function beginLevel() {
 }
 
 function resizeCanvas() {
-  const rect = canvas.parentElement.getBoundingClientRect();
+  if (gameScreen.hidden) return;
+  const rect = canvas.getBoundingClientRect();
+  const cssWidth = Math.round(rect.width);
+  const cssHeight = Math.round(rect.height);
+  if (cssWidth < 8 || cssHeight < 8) return;
+
   const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const nextWidth = Math.round(cssWidth * dpr);
+  const nextHeight = Math.round(cssHeight * dpr);
   const oldWidth = view.width;
   const oldHeight = view.height;
-  view = {
-    width: Math.max(320, rect.width),
-    height: Math.max(320, rect.height),
-    dpr
-  };
-  canvas.width = Math.round(view.width * dpr);
-  canvas.height = Math.round(view.height * dpr);
-  canvas.style.width = `${view.width}px`;
-  canvas.style.height = `${view.height}px`;
+  if (
+    canvas.width === nextWidth &&
+    canvas.height === nextHeight &&
+    Math.abs(cssWidth - oldWidth) < 0.5 &&
+    Math.abs(cssHeight - oldHeight) < 0.5
+  ) {
+    return;
+  }
+
+  view = { width: cssWidth, height: cssHeight, dpr };
+  canvas.width = nextWidth;
+  canvas.height = nextHeight;
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 
   if (game && oldWidth && oldHeight) {
@@ -647,14 +661,17 @@ function resizeCanvas() {
 }
 
 function loop(now) {
-  const dt = Math.min((now - lastFrame) / 1000, 0.034);
-  lastFrame = now;
-
-  if (game && game.running && !game.paused && !game.betweenLevels) {
-    update(dt, now);
-  }
-  draw();
   animationId = requestAnimationFrame(loop);
+  try {
+    const dt = Math.min((now - lastFrame) / 1000, 0.034);
+    lastFrame = now;
+    if (game && game.running && !game.paused && !game.betweenLevels) {
+      update(dt, now);
+    }
+    draw();
+  } catch (error) {
+    console.error(error);
+  }
 }
 
 function update(dt, now) {
@@ -884,6 +901,7 @@ function explodeBomb() {
   game.bomb.time = 0;
   burst(game.player.x, game.player.y - 40, "#9fd8ff", 40);
   floatingNotice("砰！巨人掉下去了！", "#ffe45d");
+  playSfx("boom");
   game.enemies.forEach((enemy) => {
     enemy.falling = true;
     enemy.speed = 420;
@@ -1347,6 +1365,7 @@ function shoot(now) {
     vx,
     vy
   });
+  playSfx("shoot");
 }
 
 function setFireAim(aim) {
@@ -2623,6 +2642,8 @@ function clamp(value, min, max) {
 
 let audioCtx = null;
 let masterGain = null;
+let musicGain = null;
+let sfxGain = null;
 let musicEnabled = true;
 let musicTimer = 0;
 let nextNoteTime = 0;
@@ -2645,27 +2666,49 @@ function ensureAudio() {
   if (!AudioContextClass) return;
   audioCtx = new AudioContextClass();
   masterGain = audioCtx.createGain();
-  masterGain.gain.value = musicEnabled ? 0.5 : 0;
+  masterGain.gain.value = musicEnabled ? 0.85 : 0;
   masterGain.connect(audioCtx.destination);
+  musicGain = audioCtx.createGain();
+  musicGain.gain.value = 0.9;
+  musicGain.connect(masterGain);
+  sfxGain = audioCtx.createGain();
+  sfxGain.gain.value = 0.7;
+  sfxGain.connect(masterGain);
+}
+
+function unlockAudio() {
+  ensureAudio();
+  if (!audioCtx) return Promise.resolve();
+  if (audioCtx.state === "suspended") {
+    return audioCtx.resume().catch(() => {});
+  }
+  return Promise.resolve();
 }
 
 function playViolinNote(freq, start, dur) {
-  if (!freq) return;
+  if (!freq || !audioCtx || !musicGain) return;
   const osc1 = audioCtx.createOscillator();
   osc1.type = "sawtooth";
   osc1.frequency.value = freq;
   const osc2 = audioCtx.createOscillator();
   osc2.type = "triangle";
   osc2.frequency.value = freq;
+  const bass = audioCtx.createOscillator();
+  bass.type = "square";
+  bass.frequency.value = freq / 2;
   const filter = audioCtx.createBiquadFilter();
   filter.type = "lowpass";
-  filter.frequency.value = 2400;
-  filter.Q.value = 0.8;
+  filter.frequency.value = 3200;
+  filter.Q.value = 0.7;
   const gain = audioCtx.createGain();
   gain.gain.setValueAtTime(0, start);
-  gain.gain.linearRampToValueAtTime(0.22, start + 0.07);
-  gain.gain.setValueAtTime(0.2, start + dur * 0.65);
+  gain.gain.linearRampToValueAtTime(0.42, start + 0.05);
+  gain.gain.setValueAtTime(0.36, start + dur * 0.65);
   gain.gain.linearRampToValueAtTime(0, start + dur);
+  const bassGain = audioCtx.createGain();
+  bassGain.gain.setValueAtTime(0, start);
+  bassGain.gain.linearRampToValueAtTime(0.16, start + 0.04);
+  bassGain.gain.linearRampToValueAtTime(0, start + dur);
   const lfo = audioCtx.createOscillator();
   lfo.frequency.value = 5.5;
   const lfoGain = audioCtx.createGain();
@@ -2676,35 +2719,70 @@ function playViolinNote(freq, start, dur) {
   osc1.connect(filter);
   osc2.connect(filter);
   filter.connect(gain);
-  gain.connect(masterGain);
+  gain.connect(musicGain);
+  bass.connect(bassGain);
+  bassGain.connect(musicGain);
   osc1.start(start);
   osc2.start(start);
+  bass.start(start);
   lfo.start(start);
   osc1.stop(start + dur + 0.05);
   osc2.stop(start + dur + 0.05);
+  bass.stop(start + dur + 0.05);
   lfo.stop(start + dur + 0.05);
 }
 
+function playSfx(kind) {
+  if (!musicEnabled || !audioCtx || audioCtx.state !== "running" || !sfxGain) return;
+  const now = audioCtx.currentTime;
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.connect(gain);
+  gain.connect(sfxGain);
+  if (kind === "shoot") {
+    osc.type = "square";
+    osc.frequency.setValueAtTime(920, now);
+    osc.frequency.exponentialRampToValueAtTime(240, now + 0.05);
+    gain.gain.setValueAtTime(0.12, now);
+    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.06);
+    osc.start(now);
+    osc.stop(now + 0.07);
+    return;
+  }
+  osc.type = "sawtooth";
+  osc.frequency.setValueAtTime(180, now);
+  osc.frequency.exponentialRampToValueAtTime(40, now + 0.35);
+  gain.gain.setValueAtTime(0.28, now);
+  gain.gain.exponentialRampToValueAtTime(0.001, now + 0.4);
+  osc.start(now);
+  osc.stop(now + 0.42);
+}
+
 function musicScheduler() {
-  if (!audioCtx) return;
-  while (nextNoteTime < audioCtx.currentTime + 0.25) {
+  if (!audioCtx || !musicEnabled || audioCtx.state !== "running") return;
+  if (nextNoteTime < audioCtx.currentTime - 0.2) {
+    nextNoteTime = audioCtx.currentTime;
+  }
+  let count = 0;
+  while (nextNoteTime < audioCtx.currentTime + 0.25 && count < 6) {
     const [name, beats] = melody[melodyIndex % melody.length];
-    const dur = beats * beatDur;
+    const dur = Math.max(0.08, beats * beatDur);
     playViolinNote(NOTE[name], nextNoteTime, dur * 0.92);
     nextNoteTime += dur;
     melodyIndex += 1;
+    count += 1;
   }
 }
 
 function startMusic() {
   if (!musicEnabled) return;
-  ensureAudio();
-  if (!audioCtx) return;
-  if (audioCtx.state === "suspended") audioCtx.resume();
-  if (musicTimer) return;
-  nextNoteTime = audioCtx.currentTime + 0.1;
-  musicScheduler();
-  musicTimer = setInterval(musicScheduler, 120);
+  unlockAudio().then(() => {
+    if (!musicEnabled || !audioCtx) return;
+    if (musicTimer) return;
+    nextNoteTime = audioCtx.currentTime + 0.08;
+    musicScheduler();
+    musicTimer = setInterval(musicScheduler, 120);
+  });
 }
 
 function stopMusic() {
@@ -2716,14 +2794,16 @@ function toggleMusic() {
   musicEnabled = !musicEnabled;
   musicButton.textContent = musicEnabled ? "♪" : "🔇";
   musicButton.setAttribute("aria-pressed", String(musicEnabled));
-  if (masterGain && audioCtx) {
-    masterGain.gain.setTargetAtTime(musicEnabled ? 0.5 : 0, audioCtx.currentTime, 0.05);
-  }
-  if (musicEnabled) {
-    startMusic();
-  } else {
-    stopMusic();
-  }
+  unlockAudio().then(() => {
+    if (masterGain && audioCtx) {
+      masterGain.gain.setTargetAtTime(musicEnabled ? 0.85 : 0, audioCtx.currentTime, 0.05);
+    }
+    if (musicEnabled) {
+      startMusic();
+    } else {
+      stopMusic();
+    }
+  });
 }
 
 pauseButton.addEventListener("click", togglePause);
@@ -2963,6 +3043,22 @@ window.addEventListener("resize", resizeCanvas);
 window.addEventListener("blur", () => {
   Object.keys(keys).forEach((key) => setDirection(key, false));
 });
+window.addEventListener("pointerdown", () => {
+  unlockAudio().then(() => {
+    if (musicEnabled && game && !gameScreen.hidden) startMusic();
+  });
+}, { passive: true });
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) return;
+  unlockAudio().then(() => {
+    if (musicEnabled && game && !gameScreen.hidden) startMusic();
+  });
+});
+if (typeof ResizeObserver !== "undefined") {
+  new ResizeObserver(() => {
+    if (!gameScreen.hidden) resizeCanvas();
+  }).observe(document.querySelector("#gameWrap"));
+}
 
 const motionStyle = document.createElement("style");
 motionStyle.textContent = `
