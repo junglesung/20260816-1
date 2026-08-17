@@ -10,6 +10,8 @@ const praiseLayer = document.querySelector("#praiseLayer");
 const rulesDialog = document.querySelector("#rulesDialog");
 const arsenalDialog = document.querySelector("#arsenalDialog");
 const arsenalBody = document.querySelector("#arsenalBody");
+const shopDialog = document.querySelector("#shopDialog");
+const shopBody = document.querySelector("#shopBody");
 const musicButton = document.querySelector("#musicButton");
 const chapterList = document.querySelector("#chapterList");
 const packList = document.querySelector("#packList");
@@ -34,7 +36,11 @@ const ui = {
   ammoName: document.querySelector("#ammoName"),
   homeLevel: document.querySelector("#homeLevel"),
   homeScore: document.querySelector("#homeScore"),
-  homeStars: document.querySelector("#homeStars")
+  homeStars: document.querySelector("#homeStars"),
+  homeCC: document.querySelector("#homeCC"),
+  cc: document.querySelector("#ccValue"),
+  shopCC: document.querySelector("#shopCC"),
+  shopOwned: document.querySelector("#shopOwned")
 };
 
 const MAX_CHAPTER = 10;
@@ -49,6 +55,13 @@ const LASER_DURATION = 10;
 const SHIELD_DURATION = 30;
 const BOMB_FUSE = 1;
 const EDGE_HOLD = 0.7;
+const SHOP_ITEMS = [
+  { id: "shieldBlue", name: "藍色防護罩", detail: "30 秒，前排 12–1", cost: 1 },
+  { id: "shieldWhite", name: "白色防護罩", detail: "30 秒白罩", cost: 1 },
+  { id: "shieldRed", name: "紅色防護罩", detail: "30 秒紅罩", cost: 1 },
+  { id: "laser", name: "雷射", detail: "10 秒、傷害 7", cost: 1 },
+  { id: "bomb", name: "巨型炸彈", detail: "1 秒後砰", cost: 1 }
+];
 const CLEAR_QUOTES = [
   "漂亮！這一波清得乾乾淨淨。",
   "藍色小隊再下一城！",
@@ -147,7 +160,9 @@ function loadProgress() {
     leftWallBroken: false,
     rightWallBroken: false,
     leftWallCleared: false,
-    rightWallCleared: false
+    rightWallCleared: false,
+    cc: 1,
+    shopItem: null
   };
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
@@ -169,7 +184,9 @@ function loadProgress() {
       leftWallBroken: Boolean(saved.leftWallBroken),
       rightWallBroken: Boolean(saved.rightWallBroken),
       leftWallCleared: Boolean(saved.leftWallCleared),
-      rightWallCleared: Boolean(saved.rightWallCleared)
+      rightWallCleared: Boolean(saved.rightWallCleared),
+      cc: saved.cc == null ? 1 : Math.max(0, Number(saved.cc) || 0),
+      shopItem: saved.shopItem || null
     };
   } catch (error) {
     return fallback;
@@ -240,13 +257,7 @@ function makeGame(chapter, subLevel) {
     enemies: [],
     particles: [],
     pickups: [],
-    dispensers: [
-      { type: "shieldBlue", slot: 0, timer: 1.2, interval: 11 },
-      { type: "laser", slot: 1, timer: 2.0, interval: 12 },
-      { type: "shieldWhite", slot: 2, timer: 2.8, interval: 13 },
-      { type: "shieldRed", slot: 3, timer: 3.6, interval: 13 },
-      { type: "bomb", slot: 4, timer: 1.8, interval: 12 }
-    ],
+    dispensers: [],
     leftDoor: { hits: 0, max: DOOR_HITS_NEEDED, open: false, spin: 0 },
     rightDoor: { hits: 0, max: DOOR_HITS_NEEDED, open: false, spin: 0 },
     speedLevel: 0,
@@ -264,6 +275,7 @@ function makeGame(chapter, subLevel) {
     shield: { active: false, time: 0, color: "blue", plates: [] },
     laser: { active: false, time: 0, pulse: 0 },
     bomb: { active: false, time: 0 },
+    expectCCRefund: false,
     running: true,
     paused: false,
     over: false,
@@ -444,10 +456,9 @@ function beginLevel() {
   game.shield = { active: false, time: 0, color: "blue", plates: [] };
   game.laser = { active: false, time: 0, pulse: 0 };
   game.bomb = { active: false, time: 0 };
-  game.dispensers.forEach((dispenser, index) => {
-    dispenser.timer = 0.6 + index * 0.35;
-  });
-  spawnAllPowerPickups();
+  game.expectCCRefund = false;
+  game.dispensers = [];
+  applyShopItemForThisRun();
   game.running = true;
   game.paused = false;
   game.over = false;
@@ -707,6 +718,7 @@ function explodeBomb() {
     enemy.falling = true;
     enemy.speed = 420;
   });
+  maybeRefundShopCC();
 }
 
 function fireLaserRow() {
@@ -749,6 +761,7 @@ function updatePowers(dt) {
       game.shield.active = false;
       game.shield.time = 0;
       game.shield.plates = [];
+      maybeRefundShopCC();
     }
   }
   if (game.laser.active) {
@@ -761,6 +774,7 @@ function updatePowers(dt) {
     if (game.laser.time <= 0) {
       game.laser.active = false;
       game.laser.time = 0;
+      maybeRefundShopCC();
     }
   }
   if (game.bomb.active) {
@@ -769,40 +783,80 @@ function updatePowers(dt) {
   }
 }
 
-function dispenserSpot(dispenser, bounds) {
-  const slots = Math.max(1, game.dispensers.length);
-  const slot = Number.isFinite(dispenser.slot) ? dispenser.slot : 0;
-  const pad = 18;
-  const inner = bounds.corridor - pad * 2;
-  const x = bounds.innerLeft + pad + (inner * (slot + 0.5)) / slots;
-  return { x, y: 62 };
+function updateDispensers() {
+  // 場上不再掉雷射／防護罩，改由商店購買
 }
 
-function spawnPowerPickup(dispenser) {
-  const bounds = arena();
-  const spot = dispenserSpot(dispenser, bounds);
-  game.pickups.push({
-    x: spot.x,
-    y: spot.y + 18,
-    vx: 0,
-    vy: 110,
-    radius: 14,
-    phase: random(0, 6),
-    type: dispenser.type
-  });
+function maybeRefundShopCC() {
+  if (!game || !game.expectCCRefund || !game.shopKind) return;
+  if (game.shopKind === "laser" && !game.laser.active) grantCCOnUseUp();
+  else if (game.shopKind === "bomb" && !game.bomb.active) grantCCOnUseUp();
+  else if (String(game.shopKind).startsWith("shield") && !game.shield.active) grantCCOnUseUp();
 }
 
-function spawnAllPowerPickups() {
-  game.dispensers.forEach((dispenser) => spawnPowerPickup(dispenser));
+function shopItemName(id) {
+  return SHOP_ITEMS.find((item) => item.id === id)?.name || "尚未購買";
 }
 
-function updateDispensers(dt) {
-  game.dispensers.forEach((dispenser) => {
-    dispenser.timer -= dt;
-    if (dispenser.timer > 0) return;
-    dispenser.timer = dispenser.interval;
-    spawnPowerPickup(dispenser);
-  });
+function applyShopItemForThisRun() {
+  const item = progress.shopItem;
+  if (!item || !game) return;
+  progress.shopItem = null;
+  game.expectCCRefund = true;
+  game.shopKind = item;
+  saveProgress();
+  if (item === "shieldBlue") activateShield("blue");
+  else if (item === "shieldWhite") activateShield("white");
+  else if (item === "shieldRed") activateShield("red");
+  else if (item === "laser") activateLaser();
+  else if (item === "bomb") activateBomb();
+  renderShop();
+}
+
+function grantCCOnUseUp() {
+  if (!game || !game.expectCCRefund) return;
+  game.expectCCRefund = false;
+  progress.cc = 1;
+  saveProgress();
+  updateHud();
+  renderShop();
+  floatingNotice("用完了，獲得 1 顆 CC", "#ffd83d");
+}
+
+function buyShopItem(id) {
+  const item = SHOP_ITEMS.find((entry) => entry.id === id);
+  if (!item) return;
+  if (progress.shopItem) {
+    floatingNotice("這次已經買過了，先去用完再買", "#ffd83d");
+    return;
+  }
+  if ((progress.cc || 0) < item.cost) {
+    floatingNotice("CC 不夠！", "#ff7187");
+    return;
+  }
+  progress.cc -= item.cost;
+  progress.shopItem = item.id;
+  saveProgress();
+  renderShop();
+  updateHud();
+  floatingNotice(`已購買${item.name}，進關就會使用`, item.id.includes("shield") ? "#4db7ff" : "#ffd83d");
+}
+
+function renderShop() {
+  if (!shopBody) return;
+  if (ui.shopCC) ui.shopCC.textContent = String(progress.cc || 0);
+  if (ui.shopOwned) ui.shopOwned.textContent = progress.shopItem ? shopItemName(progress.shopItem) : "尚未購買";
+  shopBody.innerHTML = `
+    <div class="arsenal-list">
+      ${SHOP_ITEMS.map((item) => `
+        <button class="arsenal-item${progress.shopItem === item.id ? " equipped" : ""}" type="button" data-shop-item="${item.id}">
+          <span class="arsenal-name">${item.name}</span>
+          <span class="arsenal-dots">${item.cost} CC</span>
+          <span class="arsenal-detail">${item.detail}</span>
+          ${progress.shopItem === item.id ? '<span class="arsenal-badge">這次要用</span>' : ""}
+        </button>
+      `).join("")}
+    </div>`;
 }
 
 function enemyLevelScale() {
@@ -1306,6 +1360,7 @@ function updateHud() {
     ui.score.textContent = game.score;
     ui.stars.textContent = game.stars;
     ui.speed.textContent = `${FIXED_SPEED_MULT.toFixed(1)}×`;
+    if (ui.cc) ui.cc.textContent = String(progress.cc || 0);
     ui.shield.textContent = game.shield.active ? `${Math.ceil(game.shield.time)}秒` : "關";
     ui.laser.textContent = game.laser.active ? `${Math.ceil(game.laser.time)}秒` : "關";
     ui.bomb.textContent = game.bomb.active ? `${game.bomb.time.toFixed(1)}秒` : "關";
@@ -1321,6 +1376,7 @@ function updateHomeInfo() {
   ui.homeLevel.textContent = `${highestUnlockedChapter()}`;
   ui.homeScore.textContent = progress.score;
   ui.homeStars.textContent = progress.stars;
+  if (ui.homeCC) ui.homeCC.textContent = String(progress.cc || 0);
 }
 
 function renderChapterList() {
@@ -1474,7 +1530,7 @@ function drawArena() {
   ctx.fillText(rightText, bounds.mid + bounds.corridor * 0.28, 24);
   ctx.fillStyle = "#9eb6d0";
   ctx.font = "700 10px Microsoft JhengHei";
-  ctx.fillText("藍罩 白罩 紅罩 雷射 巨彈會從上方掉下來", bounds.mid, 38);
+  ctx.fillText("道具改去商店用 CC 購買", bounds.mid, 38);
 }
 
 function drawDoor(side, bounds) {
@@ -1600,27 +1656,7 @@ function drawWall(x, thickness, inward, side) {
 }
 
 function drawDispensers() {
-  const bounds = arena();
-  game.dispensers.forEach((dispenser) => {
-    const spot = dispenserSpot(dispenser, bounds);
-    const info = dispenserInfo(dispenser.type);
-    const width = Math.min(62, bounds.corridor / 5.4);
-    ctx.save();
-    ctx.translate(spot.x, spot.y);
-    ctx.fillStyle = "#0d2138ee";
-    ctx.strokeStyle = info.color;
-    ctx.lineWidth = 3;
-    roundRect(-width / 2, -22, width, 44, 8);
-    ctx.fill();
-    ctx.stroke();
-    ctx.fillStyle = info.color;
-    ctx.textAlign = "center";
-    ctx.font = "900 12px Microsoft JhengHei";
-    ctx.fillText(info.title, 0, 0);
-    ctx.font = "800 9px Microsoft JhengHei";
-    ctx.fillText("會掉下來", 0, 14);
-    ctx.restore();
-  });
+  return;
 }
 
 function dispenserInfo(type) {
@@ -1945,15 +1981,18 @@ function burst(x, y, color, amount) {
 }
 
 function floatingNotice(text, color) {
+  const host = !gameScreen.hidden ? document.querySelector("#gameWrap") : document.querySelector(".hero-card");
+  if (!host) return;
   const notice = document.createElement("div");
   notice.className = "floating-notice";
   notice.textContent = text;
   notice.style.cssText = `
-    position:absolute;left:50%;top:18%;z-index:5;max-width:80%;padding:9px 15px;
+    position:absolute;left:50%;top:18%;z-index:8;max-width:80%;padding:9px 15px;
     border:1px solid ${color};border-radius:999px;background:#07162de6;color:${color};
     font-weight:900;text-align:center;pointer-events:none;transform:translateX(-50%);
     animation:notice-fade 1.8s ease forwards`;
-  document.querySelector("#gameWrap").appendChild(notice);
+  host.style.position = host.style.position || "relative";
+  host.appendChild(notice);
   setTimeout(() => notice.remove(), 1800);
 }
 
@@ -1998,13 +2037,16 @@ function resetProgress() {
     leftWallBroken: false,
     rightWallBroken: false,
     leftWallCleared: false,
-    rightWallCleared: false
+    rightWallCleared: false,
+    cc: 1,
+    shopItem: null
   };
   selectedChapter = 1;
   saveProgress();
   updateHomeInfo();
   renderChapterList();
   renderArsenal();
+  renderShop();
 }
 
 function setDirection(direction, pressed) {
@@ -2181,6 +2223,14 @@ document.querySelector("#backToPackButton").addEventListener("click", () => {
 });
 document.querySelector("#rulesButton").addEventListener("click", () => rulesDialog.showModal());
 document.querySelector("#resetButton").addEventListener("click", resetProgress);
+document.querySelector("#shopButton").addEventListener("click", () => {
+  renderShop();
+  shopDialog.showModal();
+});
+document.querySelector("#openShop").addEventListener("click", () => {
+  renderShop();
+  shopDialog.showModal();
+});
 
 chapterList.addEventListener("click", (event) => {
   const item = event.target.closest("[data-chapter]");
@@ -2218,7 +2268,7 @@ document.querySelectorAll("[data-close]").forEach((button) => {
   });
 });
 
-[rulesDialog, arsenalDialog].forEach((dialog) => {
+[rulesDialog, arsenalDialog, shopDialog].forEach((dialog) => {
   dialog.addEventListener("click", (event) => {
     if (event.target === dialog) dialog.close();
   });
@@ -2236,6 +2286,12 @@ arsenalBody.addEventListener("click", (event) => {
   saveProgress();
   renderArsenal();
   updateHud();
+});
+
+shopBody.addEventListener("click", (event) => {
+  const item = event.target.closest("[data-shop-item]");
+  if (!item) return;
+  buyShopItem(item.dataset.shopItem);
 });
 
 document.querySelectorAll(".move-button").forEach((button) => {
@@ -2317,5 +2373,6 @@ document.head.appendChild(motionStyle);
 updateHomeInfo();
 renderChapterList();
 renderArsenal();
+renderShop();
 ui.gunName.textContent = currentGun().name;
 ui.ammoName.textContent = currentAmmo().name;
