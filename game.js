@@ -36,7 +36,7 @@ const ui = {
 
 const MAX_CHAPTER = 10;
 const MEMBER_HP = 1111;
-const DOOR_HITS_NEEDED = 580;
+const DOOR_HITS_NEEDED = 300;
 const PACK_SIZE = 10;
 const SQUAD_SCALE = 0.68;
 const FIXED_SPEED_MULT = 2.5;
@@ -224,7 +224,7 @@ function makeGame(chapter, subLevel) {
     pickups: [],
     dispensers: [
       { type: "member", zone: "left", timer: 3.5, interval: 11 },
-      { type: "firerate", zone: "right", timer: 6, interval: 10 },
+      { type: "heal", zone: "right", timer: 6, interval: 10 },
       { type: "firerate", zone: "middle", timer: 2.5, interval: 7.5 }
     ],
     leftDoor: { hits: 0, max: DOOR_HITS_NEEDED, open: false, spin: 0 },
@@ -242,11 +242,11 @@ function makeGame(chapter, subLevel) {
 }
 
 function arena() {
-  const corridor = clamp(view.width * 0.2, 70, 104);
+  const corridor = clamp(view.width * 0.52, 180, 360);
   const mid = view.width / 2;
   const innerLeft = mid - corridor / 2;
   const innerRight = mid + corridor / 2;
-  const thickness = clamp((view.width - corridor) * 0.42, 48, 120);
+  const thickness = clamp((view.width - corridor) * 0.28, 36, 90);
   const left = innerLeft - thickness / 2;
   const right = innerRight + thickness / 2;
   return { left, right, thickness, innerLeft, innerRight, corridor, mid };
@@ -391,10 +391,10 @@ function startGame(chapter, subLevel) {
 
 function beginLevel() {
   const allBig = game.chapter >= MAX_CHAPTER;
-  // 第 N 小關派出更多、更密的敵人；第 1 小關仍是 1 隻大怪
+  // 第 1 小關仍是 1 隻大怪；之後敵人不那麼密
   game.enemyTotal = allBig
-    ? Math.min(Math.max(1, Math.ceil(game.subLevel / 30)), 28)
-    : Math.min(Math.max(1, Math.ceil(game.subLevel * 1.6)), 120);
+    ? Math.min(Math.max(1, Math.ceil(game.subLevel / 40)), 16)
+    : Math.min(Math.max(1, Math.ceil(game.subLevel * 0.85)), 36);
   game.spawned = 0;
   game.spawnTimer = 160;
   game.enemies.length = 0;
@@ -562,8 +562,8 @@ function spawnEnemies(dt) {
   });
   game.spawned += 1;
   game.spawnTimer = allBig
-    ? Math.max(520, 1100 - Math.floor(game.subLevel / 20) * 18)
-    : Math.max(140, 520 - Math.min(game.subLevel, 60) * 5);
+    ? Math.max(700, 1300 - Math.floor(game.subLevel / 20) * 18)
+    : Math.max(320, 780 - Math.min(game.subLevel, 40) * 6);
 }
 
 function shoot(now) {
@@ -611,7 +611,7 @@ function registerDoorHit(side) {
       vy: 90,
       radius: 13,
       phase: random(0, 6),
-      type: side === "left" ? "member" : "firerate"
+      type: side === "left" ? "member" : "heal"
     });
   }
   updateHud();
@@ -752,6 +752,12 @@ function collectPickup(pickup) {
     game.squad.push({ hp: MEMBER_HP, maxHp: MEMBER_HP });
     burst(pickup.x, pickup.y, "#58e6ff", 14);
     floatingNotice("增員 +1！", "#58e6ff");
+  } else if (pickup.type === "heal") {
+    game.squad.forEach((member) => {
+      member.hp = member.maxHp;
+    });
+    burst(pickup.x, pickup.y, "#ff8ec4", 14);
+    floatingNotice("補血！全隊回滿", "#ff8ec4");
   } else if (pickup.type === "firerate") {
     burst(pickup.x, pickup.y, "#ffe45d", 14);
     floatingNotice(`射速固定 ${FIXED_SPEED_MULT} 倍！`, "#ffe45d");
@@ -1123,14 +1129,14 @@ function drawArena() {
   ctx.fillStyle = "#d7e8ff";
   ctx.font = "800 11px Microsoft JhengHei";
   ctx.textAlign = "center";
-  const leftText = game.leftDoor.open ? "左門已開" : `左門 ${game.leftDoor.hits}/580`;
-  const rightText = game.rightDoor.open ? "右門已開" : `右門 ${game.rightDoor.hits}/580`;
+  const leftText = game.leftDoor.open ? "左門已開" : `左門 ${game.leftDoor.hits}/300`;
+  const rightText = game.rightDoor.open ? "右門已開" : `右門 ${game.rightDoor.hits}/300`;
   ctx.fillText(leftText, bounds.mid - bounds.corridor * 0.28, 24);
-  ctx.fillText("窄道樓梯", bounds.mid, 24);
+  ctx.fillText("作戰通道", bounds.mid, 24);
   ctx.fillText(rightText, bounds.mid + bounds.corridor * 0.28, 24);
   ctx.fillStyle = "#9eb6d0";
   ctx.font = "700 10px Microsoft JhengHei";
-  ctx.fillText(`雙方射速固定 ${FIXED_SPEED_MULT} 倍`, bounds.mid, 38);
+  ctx.fillText("左門加人 · 右門補血", bounds.mid, 38);
 }
 
 function drawDoor(side, bounds) {
@@ -1187,10 +1193,12 @@ function drawDoor(side, bounds) {
   ctx.fillStyle = "#eef5ff";
   ctx.font = "900 12px Microsoft JhengHei";
   ctx.textAlign = "center";
-  ctx.fillText(door.open ? "開" : `${door.hits}`, cx, box.y + box.h * 0.55);
+  ctx.fillText(door.open ? "開" : `${door.hits}`, cx, box.y + box.h * 0.52);
   ctx.font = "800 10px Microsoft JhengHei";
   ctx.fillStyle = "#b7c4d4";
-  ctx.fillText(door.open ? "鐵門" : `/ ${door.max}`, cx, box.y + box.h * 0.55 + 14);
+  ctx.fillText(door.open ? "鐵門" : `/ ${door.max}`, cx, box.y + box.h * 0.52 + 13);
+  ctx.fillStyle = side === "left" ? "#58e6ff" : "#ff8ec4";
+  ctx.fillText(side === "left" ? "加人" : "補血", cx, box.y + box.h * 0.52 + 26);
   ctx.restore();
 }
 
@@ -1255,6 +1263,7 @@ function drawDispensers() {
 
 function dispenserInfo(type) {
   if (type === "member") return { title: "加一人", color: "#40d9ff" };
+  if (type === "heal") return { title: "補血", color: "#ff8ec4" };
   return { title: "加射速", color: "#ffe14c" };
 }
 
@@ -1356,8 +1365,8 @@ function drawSquad() {
     const row = Math.floor(i / 5);
     const column = i % 5;
     const rowCount = Math.min(5, visible - row * 5);
-    const offsetX = (column - (rowCount - 1) / 2) * 12;
-    const offsetY = row * 11;
+    const offsetX = (column - (rowCount - 1) / 2) * 16;
+    const offsetY = row * 14;
     const x = game.player.x + offsetX;
     const y = game.player.y + offsetY;
 
@@ -1464,7 +1473,7 @@ function drawPickups() {
     ctx.fillStyle = "#0d2138";
     ctx.font = "900 9px Microsoft JhengHei";
     ctx.textAlign = "center";
-    ctx.fillText(pickup.type === "member" ? "+1" : "速", pickup.x, pickup.y + 3);
+    ctx.fillText(pickup.type === "member" ? "+1" : pickup.type === "heal" ? "補" : "速", pickup.x, pickup.y + 3);
   });
 }
 
