@@ -237,6 +237,24 @@ function squadHpTotal() {
   return game.squad.reduce((sum, member) => sum + member.hp, 0);
 }
 
+function isStarPickup(pickup) {
+  return pickup?.type === "starSmall" || pickup?.type === "starBig";
+}
+
+function hasStarPickups() {
+  return game?.pickups?.some((pickup) => isStarPickup(pickup) && !pickup.cosmetic) ?? false;
+}
+
+function grantStars(amount, x, y) {
+  if (!game || amount <= 0) return;
+  game.stars += amount;
+  progress.stars = game.stars;
+  saveProgress();
+  if (x != null && y != null) burst(x, y, "#ffd83d", amount >= 5 ? 18 : 12);
+  floatingNotice(`星星 +${amount}`, "#ffd83d");
+  updateHud();
+}
+
 function saveProgress() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(progress));
 }
@@ -579,7 +597,7 @@ function update(dt, now) {
   game.leftDoor.spin += dt * 2.8;
   game.rightDoor.spin += dt * 2.8;
 
-  if (game.spawned >= game.enemyTotal && game.enemies.length === 0 && !game.over && !game.falling) {
+  if (game.spawned >= game.enemyTotal && game.enemies.length === 0 && !hasStarPickups() && !game.over && !game.falling) {
     completeLevel();
   }
 }
@@ -1399,6 +1417,21 @@ function updatePickups(dt) {
       continue;
     }
 
+    if (isStarPickup(pickup)) {
+      if (pickup.cosmetic) {
+        if (pickup.y > view.height + 25) game.pickups.splice(i, 1);
+        continue;
+      }
+      const reach = pickup.radius + game.player.radius + 18;
+      if (distance(pickup, game.player) < reach) {
+        collectPickup(pickup);
+        game.pickups.splice(i, 1);
+      } else if (pickup.y > view.height + 25) {
+        game.pickups.splice(i, 1);
+      }
+      continue;
+    }
+
     if (distance(pickup, game.player) < pickup.radius + game.player.radius + 8) {
       collectPickup(pickup);
       game.pickups.splice(i, 1);
@@ -1433,10 +1466,12 @@ function collectPickup(pickup) {
     game.battleBoost = BATTLE_BOOST_TIME;
     burst(pickup.x, pickup.y, "#ffe45d", 14);
     floatingNotice("加強戰！射速再提升", "#ffe45d");
+  } else if (isStarPickup(pickup)) {
+    if (!pickup.cosmetic) {
+      grantStars(pickup.type === "starBig" ? 5 : 1, pickup.x, pickup.y);
+    }
   } else {
-    const value = pickup.type === "starBig" ? 5 : 1;
-    game.stars += value;
-    burst(pickup.x, pickup.y, "#ffd83d", 12);
+    burst(pickup.x, pickup.y, "#ffd83d", 8);
   }
   updateHud();
 }
@@ -1454,6 +1489,17 @@ function updateParticles(dt) {
 
 function defeatEnemy(index, enemy) {
   if (enemy.big) {
+    grantStars(5, enemy.x, enemy.y);
+    game.pickups.push({
+      x: enemy.x,
+      y: enemy.y,
+      vx: 0,
+      vy: 70,
+      radius: 14,
+      phase: random(0, 6),
+      type: "starBig",
+      cosmetic: true
+    });
     enemy.falling = true;
     enemy.speed = 380;
     enemy.shield = 0;
