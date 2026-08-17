@@ -58,6 +58,8 @@ const CARRIER_HP = 50;
 const CARRIER_HIT = 5;
 const CARRIER_SPEED = 88;
 const BATTLE_BOOST_TIME = 8;
+const SPRINT_BOOST_TIME = 6;
+const STAR_POWER_COST = 1;
 const SHOP_ROOM_SLOTS = 27;
 const HOTBAR_SLOTS = 9;
 const SHIELD_PLATES = [12, 9, 13, 6, 5, 4, 3, 2, 1];
@@ -245,6 +247,76 @@ function hasStarPickups() {
   return game?.pickups?.some((pickup) => isStarPickup(pickup) && !pickup.cosmetic) ?? false;
 }
 
+function trySpendStar() {
+  const available = game ? game.stars : progress.stars;
+  if ((available || 0) < STAR_POWER_COST) {
+    floatingNotice("星星不夠！需要 1 顆", "#ffd83d");
+    return false;
+  }
+  if (game) {
+    game.stars -= STAR_POWER_COST;
+    progress.stars = game.stars;
+  } else {
+    progress.stars -= STAR_POWER_COST;
+  }
+  saveProgress();
+  updateHud();
+  return true;
+}
+
+function useStarSprint() {
+  if (!game || game.over || game.falling || game.betweenLevels || game.paused) return;
+  if (!trySpendStar()) return;
+  game.sprintTimer = SPRINT_BOOST_TIME;
+  floatingNotice(`加速 ${SPRINT_BOOST_TIME} 秒！`, "#9fd8ff");
+}
+
+function useStarShield() {
+  if (!game || game.over || game.falling || game.betweenLevels || game.paused) return;
+  if (!trySpendStar()) return;
+  activateShield("blue");
+}
+
+function useStarLaser() {
+  if (!game || game.over || game.falling || game.betweenLevels || game.paused) return;
+  if (!trySpendStar()) return;
+  activateLaser();
+}
+
+function useStarBomb() {
+  if (!game || game.over || game.falling || game.betweenLevels || game.paused) return;
+  if (!trySpendStar()) return;
+  activateBomb();
+}
+
+function useStarMember() {
+  if (!game || game.over || game.falling || game.betweenLevels || game.paused) return;
+  if (!trySpendStar()) return;
+  game.squad.push({ hp: MEMBER_HP, maxHp: MEMBER_HP });
+  burst(game.player.x, game.player.y, "#58e6ff", 14);
+  floatingNotice("增員 +1！", "#58e6ff");
+  updateHud();
+}
+
+function useStarHeal() {
+  if (!game || game.over || game.falling || game.betweenLevels || game.paused) return;
+  if (!trySpendStar()) return;
+  game.squad.forEach((member) => {
+    member.hp = member.maxHp;
+  });
+  burst(game.player.x, game.player.y, "#ff8ec4", 14);
+  floatingNotice("補血！全隊回滿", "#ff8ec4");
+  updateHud();
+}
+
+function useStarBulletBoost() {
+  if (!game || game.over || game.falling || game.betweenLevels || game.paused) return;
+  if (!trySpendStar()) return;
+  game.battleBoost = BATTLE_BOOST_TIME;
+  floatingNotice(`子彈加速 ${BATTLE_BOOST_TIME} 秒！`, "#ffe45d");
+  updateHud();
+}
+
 function grantStars(amount, x, y) {
   if (!game || amount <= 0) return;
   game.stars += amount;
@@ -324,6 +396,7 @@ function makeGame(chapter, subLevel) {
     rightDoor: { hits: 0, max: DOOR_HITS_NEEDED, open: false, spin: 0 },
     speedLevel: 0,
     battleBoost: 0,
+    sprintTimer: 0,
     lastShot: 0,
     spawnTimer: 0,
     spawned: 0,
@@ -511,6 +584,7 @@ function beginLevel() {
   game.leftDoor = { hits: 0, max: DOOR_HITS_NEEDED, open: false, spin: 0 };
   game.rightDoor = { hits: 0, max: DOOR_HITS_NEEDED, open: false, spin: 0 };
   game.battleBoost = 0;
+  game.sprintTimer = 0;
   game.edgeTimer = 0;
   game.falling = false;
   game.fallVy = 0;
@@ -630,7 +704,12 @@ function updatePlayer(dt) {
     return;
   }
 
-  const speed = playerMoveSpeed();
+  if (game.sprintTimer > 0) {
+    game.sprintTimer = Math.max(0, game.sprintTimer - dt);
+  }
+
+  const sprintMult = game.sprintTimer > 0 ? 2.3 : 1;
+  const speed = playerMoveSpeed() * sprintMult;
   const leftEdge = bounds.innerLeft + 16;
   const rightEdge = bounds.innerRight - 16;
   const minY = view.height * 0.68;
@@ -1065,12 +1144,13 @@ function buyShopItem(id) {
     renderShop();
     return;
   }
-  if ((progress.cc || 0) < item.cost) {
-    floatingNotice("CC 不夠！", "#ff7187");
+  if ((progress.stars || 0) < STAR_POWER_COST) {
+    floatingNotice("星星不夠！需要 1 顆", "#ffd83d");
     renderShop();
     return;
   }
-  progress.cc -= item.cost;
+  progress.stars -= STAR_POWER_COST;
+  if (game) game.stars = progress.stars;
   progress.shopRoom.push(item.id);
   saveProgress();
   renderShop();
@@ -1083,7 +1163,7 @@ function buyShopItem(id) {
 function renderShop() {
   if (!shopBody) return;
   if (!Array.isArray(progress.shopRoom)) progress.shopRoom = [];
-  if (ui.shopCC) ui.shopCC.textContent = String(progress.cc || 0);
+  if (ui.shopCC) ui.shopCC.textContent = String(progress.stars || 0);
   if (ui.shopOwned) ui.shopOwned.textContent = roomItemSummary();
   const shopSlots = Array.from({ length: 9 }, (_, index) => {
     const item = SHOP_ITEMS[index];
@@ -1114,7 +1194,7 @@ function renderShop() {
       <div class="mc-grid">${shopSlots}</div>
       <button id="buyRainbowButton" class="rainbow-buy-button" type="button">
         <span>購買</span>
-        <small>1 CC</small>
+        <small>1 星星</small>
       </button>
       <div class="mc-service-cart" id="serviceCart">
         <div class="mc-cart-item loaded" id="serviceCartItem">${shopItemMeta(progress.shopRoom.at(-1) || selectedShopId).short}</div>
@@ -1147,7 +1227,7 @@ function renderItemHotbar() {
         ${count ? `<span class="mc-slot-count">${count}</span>` : ""}
       </button>`;
   }).join("");
-  itemHotbar.innerHTML = `<p class="mc-hotbar-label">道具格子：藍罩／白罩／紅罩／雷射／巨彈（點一下播出）</p><div class="mc-hotbar-row">${slots}</div>`;
+  itemHotbar.innerHTML = `<p class="mc-hotbar-label">道具格子（點一下播出）｜1上 2後 3左 4右｜5或空白加速｜6罩 7雷 8彈 9加人｜0補血 Q子彈加速（各1星）</p><div class="mc-hotbar-row">${slots}</div>`;
 }
 
 function skipRemainingPackLevels() {
@@ -2253,11 +2333,23 @@ function drawLaser() {
   gradient.addColorStop(0.35, "#ff4d2e");
   gradient.addColorStop(1, "#ffb347");
   ctx.save();
-  ctx.globalAlpha = 0.86;
-  ctx.shadowBlur = 22;
+  ctx.globalAlpha = 0.35;
+  ctx.shadowBlur = 36;
   ctx.shadowColor = "#ff4d2e";
   ctx.fillStyle = gradient;
+  ctx.fillRect(beam.x - 4, beam.y - 4, beam.w + 8, beam.h + 8);
+  ctx.globalAlpha = 0.95;
+  ctx.shadowBlur = 24;
   ctx.fillRect(beam.x, beam.y, beam.w, beam.h);
+  ctx.fillStyle = "#fff4ea";
+  ctx.globalAlpha = 0.55;
+  if (fireAim === "front") {
+    ctx.fillRect(beam.x + beam.w * 0.35, beam.y, beam.w * 0.3, beam.h);
+  } else if (fireAim === "left") {
+    ctx.fillRect(beam.x, beam.y + beam.h * 0.35, beam.w, beam.h * 0.3);
+  } else {
+    ctx.fillRect(beam.x, beam.y + beam.h * 0.35, beam.w, beam.h * 0.3);
+  }
   ctx.restore();
 }
 
@@ -2751,15 +2843,73 @@ const keyMap = {
   ArrowDown: "back", s: "back", S: "back"
 };
 
+const starKeyActions = {
+  Digit5: useStarSprint,
+  Numpad5: useStarSprint,
+  Digit6: useStarShield,
+  Numpad6: useStarShield,
+  Digit7: useStarLaser,
+  Numpad7: useStarLaser,
+  Digit8: useStarBomb,
+  Numpad8: useStarBomb,
+  Digit9: useStarMember,
+  Numpad9: useStarMember,
+  Digit0: useStarHeal,
+  Numpad0: useStarHeal,
+  KeyQ: useStarBulletBoost
+};
+
+function isDialogOpen() {
+  return Boolean(document.querySelector("dialog[open]"));
+}
+
 window.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && !gameScreen.hidden) {
+    togglePause();
+    return;
+  }
+  if (isDialogOpen()) return;
+
+  if (event.code === "Space") {
+    event.preventDefault();
+    if (!event.repeat) useStarSprint();
+    return;
+  }
+
+  const starAction = starKeyActions[event.code];
+  if (starAction) {
+    if (!event.repeat) starAction();
+    return;
+  }
+
+  if (event.code === "Digit1" || event.code === "Numpad1") {
+    setFireAim("front");
+    return;
+  }
+  if (event.code === "Digit2" || event.code === "Numpad2") {
+    setDirection("back", true);
+    return;
+  }
+  if (event.code === "Digit3" || event.code === "Numpad3") {
+    setFireAim("left");
+    return;
+  }
+  if (event.code === "Digit4" || event.code === "Numpad4") {
+    setFireAim("right");
+    return;
+  }
+
   if (keyMap[event.key]) {
     event.preventDefault();
     setDirection(keyMap[event.key], true);
   }
-  if (event.key === "Escape" && !gameScreen.hidden) togglePause();
 });
 
 window.addEventListener("keyup", (event) => {
+  if (event.code === "Digit2" || event.code === "Numpad2") {
+    setDirection("back", false);
+    return;
+  }
   if (keyMap[event.key]) setDirection(keyMap[event.key], false);
 });
 
