@@ -48,7 +48,7 @@ const ui = {
 
 const MAX_CHAPTER = 10;
 const MEMBER_HP = 50;
-const DOOR_HITS_NEEDED = 300;
+const DOOR_HITS_NEEDED = 100;
 const PACK_SIZE = 10;
 const SQUAD_SCALE = 0.68;
 const FIXED_SPEED_MULT = 2.5;
@@ -797,13 +797,6 @@ function activateLaser() {
 function activateBomb() {
   game.bomb.active = true;
   game.bomb.time = BOMB_FUSE;
-  game.shield.color = "blue";
-  if (game.shield.active) {
-    game.shield.plates = SHIELD_PLATES.map((hp) => ({ hp, max: hp }));
-    game.shield.time = Math.max(game.shield.time, 8);
-  } else {
-    activateShield("blue");
-  }
   floatingNotice("巨型炸彈 1 秒！", "#7ec8ff");
 }
 
@@ -816,6 +809,13 @@ function explodeBomb() {
     enemy.falling = true;
     enemy.speed = 420;
   });
+  game.shield.color = "blue";
+  if (game.shield.active) {
+    game.shield.plates = SHIELD_PLATES.map((hp) => ({ hp, max: hp }));
+    game.shield.time = Math.max(game.shield.time, 8);
+  } else {
+    activateShield("blue");
+  }
   maybeRefundShopCC();
 }
 
@@ -838,7 +838,7 @@ function fireLaserRow() {
 }
 
 function laserBeamBox(bounds = arena()) {
-  const thickness = 18;
+  const thickness = 34;
   if (fireAim === "left") {
     return { x: 0, y: game.player.y - 28, w: game.player.x, h: thickness };
   }
@@ -998,6 +998,25 @@ function activateBoughtItem(id) {
   else if (id === "bomb") activateBomb();
 }
 
+function shopTypeCount(id) {
+  return (progress.shopRoom || []).filter((entry) => entry === id).length;
+}
+
+function selectShopItem(id) {
+  if (!SHOP_ITEMS.some((item) => item.id === id)) return;
+  selectedShopId = id;
+  renderShop();
+}
+
+function deployRoomItemByType(id) {
+  const index = progress.shopRoom.indexOf(id);
+  if (index === -1) {
+    floatingNotice(`還沒有${shopItemName(id)}，請先到商店購買`, "#ffd83d");
+    return;
+  }
+  deployRoomItem(index);
+}
+
 function deployRoomItem(index) {
   if (!game || game.over || game.falling) {
     floatingNotice("進關後按格子才會播出", "#ffd83d");
@@ -1076,12 +1095,22 @@ function renderShop() {
       </button>`;
   }).join("");
   const roomSlots = Array.from({ length: SHOP_ROOM_SLOTS }, (_, index) => {
-    const id = progress.shopRoom[index];
-    return mcSlotButton(id, "", true);
+    const owned = progress.shopRoom[index];
+    if (owned) {
+      const meta = shopItemMeta(owned);
+      return `<div class="mc-slot filled room-owned" title="已買：${shopItemName(owned)}">
+        <span class="mc-slot-icon" style="background:${meta.color}">${meta.short}</span>
+      </div>`;
+    }
+    const stock = SHOP_ITEMS[index % SHOP_ITEMS.length];
+    const meta = shopItemMeta(stock.id);
+    return `<div class="mc-slot filled room-stock" title="${stock.name}">
+      <span class="mc-slot-icon dim" style="background:${meta.color}">${meta.short}</span>
+    </div>`;
   }).join("");
   shopBody.innerHTML = `
     <div class="mc-chest">
-      <p class="mc-chest-label">選擇商品（選好就買）</p>
+      <p class="mc-chest-label">選商品（藍／白／紅／雷／彈）→ 按彩虹購買</p>
       <div class="mc-grid">${shopSlots}</div>
       <button id="buyRainbowButton" class="rainbow-buy-button" type="button">
         <span>購買</span>
@@ -1107,14 +1136,18 @@ function renderShop() {
 function renderItemHotbar() {
   if (!itemHotbar) return;
   if (!Array.isArray(progress.shopRoom)) progress.shopRoom = [];
-  itemHotbar.innerHTML = Array.from({ length: HOTBAR_SLOTS }, (_, index) => {
-    const id = progress.shopRoom[index];
-    const meta = id ? shopItemMeta(id) : null;
+  const slots = SHOP_ITEMS.map((item) => {
+    const count = shopTypeCount(item.id);
+    const meta = shopItemMeta(item.id);
+    const label = item.id === "bomb" ? "彈" : meta.short;
     return `
-      <button class="mc-slot${id ? " filled" : ""}" type="button" data-hotbar-index="${index}" ${id ? "" : "disabled"} title="${id ? shopItemName(id) : "空格子"}">
-        ${id ? `<span class="mc-slot-icon" style="background:${meta.color}">${meta.short}</span>` : ""}
+      <button class="mc-slot hotbar-slot${count ? " filled" : ""}" type="button" data-deploy-item="${item.id}" title="${item.name}${count ? ` ×${count}` : "（尚未購買）"}">
+        <span class="mc-slot-icon" style="background:${meta.color}">${label}</span>
+        <span class="mc-hotbar-name">${item.name.replace("防護罩", "罩").replace("巨型炸彈", "巨彈").replace("藍色", "藍").replace("白色", "白").replace("紅色", "紅")}</span>
+        ${count ? `<span class="mc-slot-count">${count}</span>` : ""}
       </button>`;
   }).join("");
+  itemHotbar.innerHTML = `<p class="mc-hotbar-label">道具格子：藍罩／白罩／紅罩／雷射／巨彈（點一下播出）</p><div class="mc-hotbar-row">${slots}</div>`;
 }
 
 function skipRemainingPackLevels() {
@@ -1185,7 +1218,7 @@ function spawnEnemies(dt) {
   const radius = big ? 26 : 11;
   const scale = enemyHpScale();
   const hp = (big ? 100 : 1) * scale;
-  const shield = (big ? 500 : 0) * scale;
+  const shield = big ? 100 : 0;
   const margin = big ? radius + 2 : radius + 4;
   game.enemies.push({
     x: random(bounds.innerLeft + margin, bounds.innerRight - margin),
@@ -1196,8 +1229,8 @@ function spawnEnemies(dt) {
     maxHp: hp,
     shield,
     shieldMax: shield,
-    speed: big ? 30 : 46,
-    shootTimer: random(700, 1400),
+    speed: big ? 72 : 46,
+    shootTimer: big ? random(280, 480) : random(700, 1400),
     phase: random(0, Math.PI * 2),
     falling: false
   });
@@ -1350,13 +1383,18 @@ function updateEnemies(dt) {
       continue;
     }
     enemy.y += enemy.speed * dt;
-    enemy.x += Math.sin(enemy.phase) * 5 * dt;
+    if (enemy.big) {
+      const chase = clamp(game.player.x - enemy.x, -enemy.speed * 0.7 * dt, enemy.speed * 0.7 * dt);
+      enemy.x += chase;
+    } else {
+      enemy.x += Math.sin(enemy.phase) * 5 * dt;
+    }
     enemy.x = clamp(enemy.x, bounds.innerLeft + enemy.radius, bounds.innerRight - enemy.radius);
 
-    const canShoot = !enemy.big || enemy.shield <= 0;
+    const canShoot = enemy.y > 20 && enemy.y < view.height * 0.78;
     if (canShoot) {
       enemy.shootTimer -= dt * 1000;
-      if (enemy.shootTimer <= 0 && enemy.y > 20 && enemy.y < view.height * 0.72) {
+      if (enemy.shootTimer <= 0) {
         const angle = Math.atan2(game.player.y - enemy.y, game.player.x - enemy.x);
         const bulletSpeed = 210 * FIXED_SPEED_MULT;
         game.enemyBullets.push({
@@ -1871,8 +1909,8 @@ function drawArena() {
   ctx.fillStyle = "#d7e8ff";
   ctx.font = "800 11px Microsoft JhengHei";
   ctx.textAlign = "center";
-  const leftText = game.leftDoor.open ? "左門已開·加人橫出" : `左門 ${game.leftDoor.hits}/300`;
-  const rightText = game.rightDoor.open ? "右門已開·補血橫出" : `右門 ${game.rightDoor.hits}/300`;
+  const leftText = game.leftDoor.open ? "左門已開·加人橫出" : `左門 ${game.leftDoor.hits}/100`;
+  const rightText = game.rightDoor.open ? "右門已開·補血橫出" : `右門 ${game.rightDoor.hits}/100`;
   ctx.fillText(leftText, bounds.mid - bounds.corridor * 0.28, 24);
   ctx.fillText("作戰通道", bounds.mid, 24);
   ctx.fillText(rightText, bounds.mid + bounds.corridor * 0.28, 24);
@@ -2682,13 +2720,13 @@ shopBody.addEventListener("click", (event) => {
   }
   const item = event.target.closest("[data-shop-item]");
   if (!item || item.disabled) return;
-  buyShopItem(item.dataset.shopItem);
+  selectShopItem(item.dataset.shopItem);
 });
 
 itemHotbar?.addEventListener("click", (event) => {
-  const slot = event.target.closest("[data-hotbar-index]");
-  if (!slot || slot.disabled) return;
-  deployRoomItem(Number(slot.dataset.hotbarIndex));
+  const slot = event.target.closest("[data-deploy-item]");
+  if (!slot) return;
+  deployRoomItemByType(slot.dataset.deployItem);
 });
 
 skipWallButton?.addEventListener("click", skipRemainingPackLevels);
