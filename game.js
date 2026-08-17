@@ -1458,7 +1458,7 @@ function drawPickups() {
     ctx.fillStyle = "#0d2138";
     ctx.font = "900 9px Microsoft JhengHei";
     ctx.textAlign = "center";
-    ctx.fillText(pickup.type === "member" ? "+1" : pickup.type === "heal" ? "補" : "速", pickup.x, pickup.y + 3);
+    ctx.fillText(pickup.type === "member" ? "+1" : "速", pickup.x, pickup.y + 3);
   });
 }
 

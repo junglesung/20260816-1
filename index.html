@@ -42,12 +42,12 @@
         <section class="rules-card" aria-labelledby="rulesTitle">
           <h2 id="rulesTitle" class="rainbow-text">遊戲規則</h2>
           <ul>
-            <li><span>🧱</span> 左右兩道城牆，中間是窄樓梯通道，只夠小隊員與大怪交錯通過。</li>
-            <li><span>🚪</span> 兩側各有一道門，各需打中 500 發才會打開；進度顯示在上方。</li>
-            <li><span>🔫</span> 小隊固定三管齊射，左中右一起直線往前打。</li>
-            <li><span>🎁</span> 左牆加一人、右牆補血、中間加射速，只有我們吃得到。</li>
-            <li><span>🗺️</span> 選章節後會再分成多組，每組固定 10 關，直到該章全部關卡用完。</li>
-            <li><span>🏁</span> 第 1 章 100 關、第 2 章 200 關…第 10 章 1000 關；打完該章才解鎖下一章。</li>
+            <li><span>🧱</span> 左右兩道城牆挖有凹槽，中間是窄樓梯通道。</li>
+            <li><span>🚪</span> 左右鐵門各需打中 580 發才會打開，門上會顯示子彈數，上方有旋轉輪。</li>
+            <li><span>🔫</span> 小隊固定三管齊射；人再多射擊方式也一樣。</li>
+            <li><span>⚡</span> 我方與敵方速度都固定 2.5 倍，不再一路加速。</li>
+            <li><span>🎁</span> 左牆加一人、右牆與中間送出加射速（維持 2.5 倍），已取消補血。</li>
+            <li><span>🗺️</span> 選章節後再分成多組，每組 10 關。</li>
           </ul>
           <p class="tip">操作：左右移動、向後撤退；三管會自動直線開火。</p>
         </section>
@@ -104,8 +104,8 @@
           <span>分數 <strong id="scoreValue">0</strong></span>
           <span>星星 <strong id="starValue">0</strong></span>
           <span>射速 <strong id="speedValue">1.00×</strong></span>
-          <span>左門 <strong id="leftDoorValue">0/500</strong></span>
-          <span>右門 <strong id="rightDoorValue">0/500</strong></span>
+          <span>左門 <strong id="leftDoorValue">0/580</strong></span>
+          <span>右門 <strong id="rightDoorValue">0/580</strong></span>
         </div>
       </header>
 
@@ -145,10 +145,10 @@
     <dialog id="rulesDialog">
       <button class="dialog-close" type="button" data-close="rulesDialog" aria-label="關閉規則">×</button>
       <h2 class="rainbow-text">遊戲規則</h2>
-      <p>左右移動藍色小隊、向後撤退閃避。隊伍會以三管直線齊射，消滅所有紅色敵軍即可過關。</p>
-      <p>中間是窄樓梯通道；左右城牆各有一道門，各打中 500 發才會打開。</p>
-      <p>選章節後會再分成多組，每組 10 關，可自由挑選該組內關卡。</p>
-      <p>打完該章全部小關後才會解鎖下一章。</p>
+      <p>左右移動藍色小隊、向後撤退閃避。隊伍固定三管直線齊射，人數再多也一樣。</p>
+      <p>左右鐵門各需 580 發打開，門上顯示子彈數並有旋轉輪；城牆門位有凹槽。</p>
+      <p>雙方速度固定 2.5 倍。左牆加一人，右牆與中間加射速，已取消補血。</p>
+      <p>選章節後分成多組，每組 10 關。</p>
     </dialog>
 
     <dialog id="arsenalDialog">
@@ -159,6 +159,6 @@
     </dialog>
   </main>
 
-  <script src="game.js?v=202608170528"></script>
+  <script src="game.js?v=202608170535"></script>
 </body>
 </html>
