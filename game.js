@@ -288,12 +288,12 @@ function startGame(chapter, subLevel) {
 
 function beginLevel() {
   const allBig = game.chapter >= MAX_CHAPTER;
-  const spawnPressure = Math.min(game.subLevel, 80);
+  // 第 N 小關派出 N 隻敵人；第 1 章第 1 小關＝只打掉 1 隻大怪
   game.enemyTotal = allBig
-    ? Math.min(8 + Math.floor(game.subLevel / 50), 18)
-    : Math.min(8 + spawnPressure * 2, 40);
+    ? Math.min(Math.max(1, Math.ceil(game.subLevel / 40)), 20)
+    : Math.min(Math.max(1, game.subLevel), 80);
   game.spawned = 0;
-  game.spawnTimer = 400;
+  game.spawnTimer = 200;
   game.enemies.length = 0;
   game.bullets.length = 0;
   game.enemyBullets.length = 0;
@@ -432,7 +432,8 @@ function spawnEnemies(dt) {
 
   const bounds = arena();
   const allBig = game.chapter >= MAX_CHAPTER;
-  const big = allBig || game.spawned === 0 || game.spawned % 4 === 0;
+  const singleBoss = game.enemyTotal === 1;
+  const big = allBig || singleBoss || game.spawned === 0 || game.spawned % 4 === 0;
   const radius = big ? 34 : 16;
   const scale = enemyHpScale();
   const hp = (big ? 100 : 1) * scale;
@@ -833,7 +834,7 @@ function renderSubLevelList() {
   const cleared = getChapterCleared(chapter);
   const visible = visibleSubLevelCount(chapter);
   stageSelectTitle.textContent = `第 ${chapter} 章`;
-  stageSelectHint.textContent = `共 ${goal} 小關。一開始只會出現第 1 小關，打通後才會解鎖下一小關。打完 ${goal} 小關後才能解鎖下一章。`;
+  stageSelectHint.textContent = `共 ${goal} 小關。第 1 小關先打掉 1 隻大怪；打通後才解鎖下一小關。打完全部 ${goal} 小關後才能解鎖下一章。`;
 
   const items = [];
   for (let sub = 1; sub <= visible; sub += 1) {
@@ -845,7 +846,7 @@ function renderSubLevelList() {
         <span class="stage-item-index">${sub}</span>
         <span class="stage-item-body">
           <span class="stage-item-title">第 ${sub} 小關</span>
-          <span class="stage-item-meta">${sub === 1 && chapter === 1 ? "原本的第一關挑戰" : `難度倍率 ×${difficultyScale(chapter, sub)}`}</span>
+          <span class="stage-item-meta">${sub === 1 ? "打掉 1 隻大怪即可過關" : `派出 ${Math.min(sub, 80)} 隻敵人 · 難度 ×${difficultyScale(chapter, sub)}`}</span>
         </span>
         <span class="stage-item-status">${isCleared ? "已通過" : "挑戰"}</span>
       </button>
