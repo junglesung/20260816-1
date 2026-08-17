@@ -668,6 +668,34 @@ h1 {
   font-weight: 900;
 }
 
+.aim-switch {
+  min-width: 0;
+  text-align: left;
+}
+
+.aim-switch-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.aim-button {
+  padding: 7px 10px;
+  border: 1px solid #ffffff3d;
+  border-radius: 9px;
+  background: #0d224099;
+  color: #d7e6f7;
+  cursor: pointer;
+  font-size: .74rem;
+  font-weight: 800;
+}
+
+.aim-button.selected {
+  border-color: #ffd83d;
+  background: var(--yellow);
+  color: #17243b;
+}
+
 .weapon-bar button {
   padding: 8px 12px;
   border: 0;
@@ -677,6 +705,18 @@ h1 {
   cursor: pointer;
   font-size: .76rem;
   font-weight: 900;
+}
+
+.weapon-bar .aim-button {
+  background: #0d224099;
+  color: #d7e6f7;
+  border: 1px solid #ffffff3d;
+}
+
+.weapon-bar .aim-button.selected {
+  background: var(--yellow);
+  color: #17243b;
+  border-color: #ffd83d;
 }
 
 .weapon-bar button:disabled {
@@ -928,8 +968,20 @@ dialog p {
     font-size: .76rem;
   }
 
-  .weapon-bar button {
+  .weapon-bar #openArsenal {
     width: 100%;
+  }
+
+  .aim-switch {
+    width: 100%;
+  }
+
+  .aim-switch-row {
+    width: 100%;
+  }
+
+  .aim-button {
+    flex: 1;
   }
 
   .stats {

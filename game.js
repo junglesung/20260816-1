@@ -44,7 +44,7 @@ const CLEAR_QUOTES = [
   "漂亮！這一波清得乾乾淨淨。",
   "藍色小隊再下一城！",
   "窄道突圍成功，繼續往前衝！",
-  "三管齊射，紅色軍團擋不住！",
+  "單排直射，紅色軍團擋不住！",
   "門縫裡的補給也別忘了拿哦。"
 ];
 
@@ -71,6 +71,7 @@ const keys = { left: false, right: false, back: false };
 let progress = loadProgress();
 let selectedChapter = 1;
 let selectedPack = 1;
+let fireAim = "front";
 let view = { width: 900, height: 620, dpr: 1 };
 let lastFrame = 0;
 let animationId = 0;
@@ -568,24 +569,29 @@ function spawnEnemies(dt) {
 function shoot(now) {
   const gun = currentGun();
   const ammo = currentAmmo();
-  // 射速固定 2.5 倍，不隨人數或補給疊加速度
   if (now - game.lastShot < gun.fire / FIXED_SPEED_MULT) return;
   game.lastShot = now;
 
   const bounds = arena();
-  const lane = bounds.corridor * 0.32;
-  // 左中右三管一起直線發射（人數再多也一樣）
-  [-lane, 0, lane].forEach((offset) => {
-    game.bullets.push({
-      x: clamp(game.player.x + offset, bounds.innerLeft + 6, bounds.innerRight - 6),
-      y: game.player.y - 18,
-      radius: ammo.size * 0.9,
-      speed: 560,
-      damage: bulletDamage(),
-      color: ammo.color,
-      vx: 0,
-      vy: -560
-    });
+  let x = game.player.x;
+  if (fireAim === "left") x = bounds.innerLeft + 8;
+  if (fireAim === "right") x = bounds.innerRight - 8;
+  game.bullets.push({
+    x,
+    y: game.player.y - 18,
+    radius: ammo.size * 0.95,
+    speed: 560,
+    damage: bulletDamage(),
+    color: ammo.color,
+    vx: 0,
+    vy: -560
+  });
+}
+
+function setFireAim(aim) {
+  fireAim = aim;
+  document.querySelectorAll(".aim-button").forEach((button) => {
+    button.classList.toggle("selected", button.dataset.aim === aim);
   });
 }
 
@@ -1756,6 +1762,10 @@ document.querySelector("#arsenalButton").addEventListener("click", () => {
 document.querySelector("#openArsenal").addEventListener("click", () => {
   renderArsenal();
   arsenalDialog.showModal();
+});
+
+document.querySelectorAll(".aim-button").forEach((button) => {
+  button.addEventListener("click", () => setFireAim(button.dataset.aim));
 });
 
 document.querySelectorAll("[data-close]").forEach((button) => {

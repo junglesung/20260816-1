@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#07162d">
   <title>藍紅小隊大對決</title>
-  <link rel="stylesheet" href="styles.css?v=202608170535">
+  <link rel="stylesheet" href="styles.css?v=202608170542">
 </head>
 <body>
   <main class="app">
     <section id="startScreen" class="start-screen" aria-labelledby="gameTitle">
-      <p id="updateStamp" class="update-stamp" aria-label="程式更新時間">更新時間：2026/08/17 05:35</p>
+      <p id="updateStamp" class="update-stamp" aria-label="程式更新時間">更新時間：2026/08/17 05:42</p>
       <div class="hero-card">
         <p class="eyebrow">小隊射擊闖關遊戲</p>
         <h1 id="gameTitle">
@@ -44,12 +44,12 @@
           <ul>
             <li><span>🧱</span> 左右兩道城牆挖有凹槽，中間是窄樓梯通道。</li>
             <li><span>🚪</span> 左右鐵門各需打中 580 發才會打開，門上會顯示子彈數，上方有旋轉輪。</li>
-            <li><span>🔫</span> 小隊固定三管齊射；人再多射擊方式也一樣。</li>
+            <li><span>🔫</span> 小隊只發射一排子彈；可選擇打前面、左邊或右邊。</li>
             <li><span>⚡</span> 我方與敵方速度都固定 2.5 倍，不再一路加速。</li>
             <li><span>🎁</span> 左牆加一人、右牆與中間送出加射速（維持 2.5 倍），已取消補血。</li>
             <li><span>🗺️</span> 選章節後再分成多組，每組 10 關。</li>
           </ul>
-          <p class="tip">操作：左右移動、向後撤退；三管會自動直線開火。</p>
+          <p class="tip">操作：左右移動、向後撤退；可切換子彈打前面、左邊或右邊。</p>
         </section>
 
         <section class="chapter-panel" aria-labelledby="chapterListTitle">
@@ -118,6 +118,14 @@
           <span class="label">目前子彈</span>
           <strong id="ammoName">普通子彈</strong>
         </div>
+        <div class="aim-switch" role="group" aria-label="子彈方向">
+          <span class="label">子彈方向</span>
+          <div class="aim-switch-row">
+            <button class="aim-button" type="button" data-aim="left">左邊</button>
+            <button class="aim-button selected" type="button" data-aim="front">前面</button>
+            <button class="aim-button" type="button" data-aim="right">右邊</button>
+          </div>
+        </div>
         <button id="openArsenal" type="button">武器庫</button>
       </div>
 
@@ -145,7 +153,7 @@
     <dialog id="rulesDialog">
       <button class="dialog-close" type="button" data-close="rulesDialog" aria-label="關閉規則">×</button>
       <h2 class="rainbow-text">遊戲規則</h2>
-      <p>左右移動藍色小隊、向後撤退閃避。隊伍固定三管直線齊射，人數再多也一樣。</p>
+      <p>左右移動藍色小隊、向後撤退閃避。隊伍只發射一排子彈，可選擇打前面、左邊或右邊。</p>
       <p>左右鐵門各需 580 發打開，門上顯示子彈數並有旋轉輪；城牆門位有凹槽。</p>
       <p>雙方速度固定 2.5 倍。左牆加一人，右牆與中間加射速，已取消補血。</p>
       <p>選章節後分成多組，每組 10 關。</p>
@@ -159,6 +167,6 @@
     </dialog>
   </main>
 
-  <script src="game.js?v=202608170535"></script>
+  <script src="game.js?v=202608170542"></script>
 </body>
 </html>
