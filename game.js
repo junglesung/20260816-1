@@ -25,6 +25,9 @@ const ui = {
   score: document.querySelector("#scoreValue"),
   stars: document.querySelector("#starValue"),
   speed: document.querySelector("#speedValue"),
+  shield: document.querySelector("#shieldValue"),
+  laser: document.querySelector("#laserValue"),
+  bomb: document.querySelector("#bombValue"),
   leftDoor: document.querySelector("#leftDoorValue"),
   rightDoor: document.querySelector("#rightDoorValue"),
   gunName: document.querySelector("#gunName"),
@@ -40,6 +43,12 @@ const DOOR_HITS_NEEDED = 300;
 const PACK_SIZE = 10;
 const SQUAD_SCALE = 0.68;
 const FIXED_SPEED_MULT = 2.5;
+const SHIELD_PLATES = [12, 9, 13, 6, 5, 4, 3, 2, 1];
+const LASER_DAMAGE = 7;
+const LASER_DURATION = 10;
+const SHIELD_DURATION = 30;
+const BOMB_FUSE = 1;
+const EDGE_HOLD = 0.7;
 const CLEAR_QUOTES = [
   "漂亮！這一波清得乾乾淨淨。",
   "藍色小隊再下一城！",
@@ -225,7 +234,11 @@ function makeGame(chapter, subLevel) {
     dispensers: [
       { type: "member", zone: "left", timer: 3.5, interval: 11 },
       { type: "heal", zone: "right", timer: 6, interval: 10 },
-      { type: "firerate", zone: "middle", timer: 2.5, interval: 7.5 }
+      { type: "shieldBlue", zone: "left", timer: 8, interval: 16 },
+      { type: "shieldWhite", zone: "right", timer: 10, interval: 18 },
+      { type: "shieldRed", zone: "middle", timer: 12, interval: 20 },
+      { type: "laser", zone: "left", timer: 5.5, interval: 14 },
+      { type: "bomb", zone: "right", timer: 7, interval: 15 }
     ],
     leftDoor: { hits: 0, max: DOOR_HITS_NEEDED, open: false, spin: 0 },
     rightDoor: { hits: 0, max: DOOR_HITS_NEEDED, open: false, spin: 0 },
@@ -234,6 +247,12 @@ function makeGame(chapter, subLevel) {
     spawnTimer: 0,
     spawned: 0,
     enemyTotal: 0,
+    edgeTimer: 0,
+    falling: false,
+    fallVy: 0,
+    shield: { active: false, time: 0, color: "blue", plates: [] },
+    laser: { active: false, time: 0, pulse: 0 },
+    bomb: { active: false, time: 0 },
     running: true,
     paused: false,
     over: false,
@@ -404,6 +423,12 @@ function beginLevel() {
   game.particles.length = 0;
   game.leftDoor = { hits: 0, max: DOOR_HITS_NEEDED, open: false, spin: 0 };
   game.rightDoor = { hits: 0, max: DOOR_HITS_NEEDED, open: false, spin: 0 };
+  game.edgeTimer = 0;
+  game.falling = false;
+  game.fallVy = 0;
+  game.shield = { active: false, time: 0, color: "blue", plates: [] };
+  game.laser = { active: false, time: 0, pulse: 0 };
+  game.bomb = { active: false, time: 0 };
   game.dispensers.forEach((dispenser, index) => {
     dispenser.timer = 2.5 + index * 1.5;
   });
@@ -463,9 +488,10 @@ function loop(now) {
 
 function update(dt, now) {
   updatePlayer(dt);
+  updatePowers(dt);
   updateDispensers(dt);
   spawnEnemies(dt);
-  shoot(now);
+  if (!game.falling) shoot(now);
   updateBullets(dt);
   updateEnemies(dt);
   updateEnemyBullets(dt);
@@ -474,13 +500,21 @@ function update(dt, now) {
   game.leftDoor.spin += dt * 2.8;
   game.rightDoor.spin += dt * 2.8;
 
-  if (game.spawned >= game.enemyTotal && game.enemies.length === 0 && !game.over) {
+  if (game.spawned >= game.enemyTotal && game.enemies.length === 0 && !game.over && !game.falling) {
     completeLevel();
   }
 }
 
 function updatePlayer(dt) {
   const bounds = arena();
+  if (game.falling) {
+    game.fallVy += 980 * dt;
+    game.player.y += game.fallVy * dt;
+    game.player.x += (game.player.x < bounds.mid ? -40 : 40) * dt;
+    if (game.player.y > view.height + 40) fallToDeath();
+    return;
+  }
+
   const speed = Math.max(230, view.width * 0.38);
   if (keys.left) game.player.x -= speed * dt;
   if (keys.right) game.player.x += speed * dt;
@@ -489,8 +523,192 @@ function updatePlayer(dt) {
     const homeY = view.height - 52;
     game.player.y += (homeY - game.player.y) * Math.min(1, dt * 5);
   }
-  game.player.x = clamp(game.player.x, bounds.innerLeft + 16, bounds.innerRight - 16);
+
+  const leftEdge = bounds.innerLeft + 16;
+  const rightEdge = bounds.innerRight - 16;
+  const atLeft = game.player.x <= leftEdge + 1;
+  const atRight = game.player.x >= rightEdge - 1;
+  if ((atLeft && keys.left) || (atRight && keys.right)) {
+    game.edgeTimer += dt;
+    if (game.edgeTimer >= EDGE_HOLD) {
+      startFalling(atLeft ? "left" : "right");
+      return;
+    }
+  } else {
+    game.edgeTimer = Math.max(0, game.edgeTimer - dt * 1.8);
+  }
+
+  game.player.x = clamp(game.player.x, leftEdge, rightEdge);
   game.player.y = clamp(game.player.y, view.height * 0.68, view.height - 28);
+}
+
+function startFalling() {
+  if (game.falling || game.over) return;
+  game.falling = true;
+  game.fallVy = 40;
+  floatingNotice("滑到最旁邊，掉下去了！", "#ffd27a");
+}
+
+function stripWeapons() {
+  progress.gunsOwned = 1;
+  progress.ammosOwned = 1;
+  progress.gunIndex = 0;
+  progress.ammoIndex = 0;
+  saveProgress();
+  updateHud();
+}
+
+function fallToDeath() {
+  if (game.over) return;
+  stripWeapons();
+  floatingNotice("槍械全部掉光，只剩練習手槍！", "#ff7187");
+  game.falling = false;
+  game.fallVy = 0;
+  const bounds = arena();
+  game.player.x = bounds.mid;
+  game.player.y = view.height - 52;
+  if (game.squad.length > 0) game.squad.pop();
+  updateHud();
+  if (game.squad.length === 0) {
+    endGame();
+    return;
+  }
+  burst(game.player.x, game.player.y, "#ff536d", 16);
+}
+
+function activateShield(color) {
+  game.shield = {
+    active: true,
+    time: SHIELD_DURATION,
+    color,
+    plates: SHIELD_PLATES.map((hp) => ({ hp, max: hp }))
+  };
+  floatingNotice(color === "blue" ? "藍色防護罩 30 秒！" : color === "white" ? "白色防護罩 30 秒！" : "紅色防護罩 30 秒！", shieldColor(color));
+}
+
+function shieldColor(color) {
+  if (color === "white") return "#f4f8ff";
+  if (color === "red") return "#ff536d";
+  return "#4db7ff";
+}
+
+function shieldRowBox() {
+  const width = 168;
+  const height = 16;
+  return {
+    x: game.player.x - width / 2,
+    y: game.player.y - 36,
+    w: width,
+    h: height
+  };
+}
+
+function hitShieldPlates(amount) {
+  if (!game.shield.active) return false;
+  while (amount > 0 && game.shield.plates.length) {
+    const plate = game.shield.plates[0];
+    const take = Math.min(plate.hp, amount);
+    plate.hp -= take;
+    amount -= take;
+    if (plate.hp <= 0) game.shield.plates.shift();
+  }
+  if (!game.shield.plates.length) {
+    game.shield.active = false;
+    game.shield.time = 0;
+    floatingNotice("防護罩破了！", "#9fd8ff");
+  }
+  return true;
+}
+
+function activateLaser() {
+  game.laser.active = true;
+  game.laser.time = LASER_DURATION;
+  game.laser.pulse = 0;
+  floatingNotice("雷射 10 秒！一排打過去", "#ff6a3c");
+}
+
+function activateBomb() {
+  game.bomb.active = true;
+  game.bomb.time = BOMB_FUSE;
+  game.shield.color = "blue";
+  if (game.shield.active) {
+    game.shield.plates = SHIELD_PLATES.map((hp) => ({ hp, max: hp }));
+    game.shield.time = Math.max(game.shield.time, 8);
+  } else {
+    activateShield("blue");
+  }
+  floatingNotice("巨型炸彈 1 秒！", "#7ec8ff");
+}
+
+function explodeBomb() {
+  game.bomb.active = false;
+  game.bomb.time = 0;
+  burst(game.player.x, game.player.y - 40, "#9fd8ff", 40);
+  floatingNotice("砰！巨人掉下去了！", "#ffe45d");
+  game.enemies.forEach((enemy) => {
+    enemy.falling = true;
+    enemy.speed = 420;
+  });
+}
+
+function fireLaserRow() {
+  const beam = laserBeamBox();
+  for (let e = game.enemies.length - 1; e >= 0; e -= 1) {
+    const enemy = game.enemies[e];
+    if (enemy.falling) continue;
+    if (rectHitsCircle(beam, enemy)) {
+      hitEnemy(e, enemy, { damage: LASER_DAMAGE, color: "#ff4d2e" });
+    }
+  }
+}
+
+function laserBeamBox(bounds = arena()) {
+  const thickness = 18;
+  if (fireAim === "left") {
+    return { x: 0, y: game.player.y - 28, w: game.player.x, h: thickness };
+  }
+  if (fireAim === "right") {
+    return { x: game.player.x, y: game.player.y - 28, w: view.width - game.player.x, h: thickness };
+  }
+  return {
+    x: game.player.x - thickness / 2,
+    y: 0,
+    w: thickness,
+    h: game.player.y - 8
+  };
+}
+
+function rectHitsCircle(box, circle) {
+  const nx = clamp(circle.x, box.x, box.x + box.w);
+  const ny = clamp(circle.y, box.y, box.y + box.h);
+  return Math.hypot(circle.x - nx, circle.y - ny) < circle.radius;
+}
+
+function updatePowers(dt) {
+  if (game.shield.active) {
+    game.shield.time -= dt;
+    if (game.shield.time <= 0 || !game.shield.plates.length) {
+      game.shield.active = false;
+      game.shield.time = 0;
+      game.shield.plates = [];
+    }
+  }
+  if (game.laser.active) {
+    game.laser.time -= dt;
+    game.laser.pulse += dt;
+    if (game.laser.pulse >= 0.16) {
+      game.laser.pulse = 0;
+      fireLaserRow();
+    }
+    if (game.laser.time <= 0) {
+      game.laser.active = false;
+      game.laser.time = 0;
+    }
+  }
+  if (game.bomb.active) {
+    game.bomb.time -= dt;
+    if (game.bomb.time <= 0) explodeBomb();
+  }
 }
 
 function updateDispensers(dt) {
@@ -558,7 +776,8 @@ function spawnEnemies(dt) {
     shieldMax: shield,
     speed: (big ? 30 : 46) * FIXED_SPEED_MULT,
     shootTimer: random(700, 1400),
-    phase: random(0, Math.PI * 2)
+    phase: random(0, Math.PI * 2),
+    falling: false
   });
   game.spawned += 1;
   game.spawnTimer = allBig
@@ -572,19 +791,25 @@ function shoot(now) {
   if (now - game.lastShot < gun.fire / FIXED_SPEED_MULT) return;
   game.lastShot = now;
 
-  const bounds = arena();
-  let x = game.player.x;
-  if (fireAim === "left") x = bounds.innerLeft + 8;
-  if (fireAim === "right") x = bounds.innerRight - 8;
+  const speed = 560;
+  let vx = 0;
+  let vy = -speed;
+  if (fireAim === "left") {
+    vx = -speed;
+    vy = 0;
+  } else if (fireAim === "right") {
+    vx = speed;
+    vy = 0;
+  }
   game.bullets.push({
-    x,
-    y: game.player.y - 18,
+    x: game.player.x,
+    y: game.player.y - 16,
     radius: ammo.size * 0.95,
-    speed: 560,
+    speed,
     damage: bulletDamage(),
     color: ammo.color,
-    vx: 0,
-    vy: -560
+    vx,
+    vy
   });
 }
 
@@ -640,10 +865,11 @@ function updateBullets(dt) {
       continue;
     }
 
+    const sideways = Math.abs(bullet.vx || 0) > Math.abs(bullet.vy || 0);
     const inOpenLeft = game.leftDoor.open && pointInBox(bullet, leftBox);
     const inOpenRight = game.rightDoor.open && pointInBox(bullet, rightBox);
     const outsideLane = bullet.x <= bounds.innerLeft || bullet.x >= bounds.innerRight;
-    if (outsideLane && !inOpenLeft && !inOpenRight) {
+    if (!sideways && outsideLane && !inOpenLeft && !inOpenRight) {
       burst(bullet.x, bullet.y, "#c9d8e4", 3);
       game.bullets.splice(i, 1);
       continue;
@@ -660,7 +886,9 @@ function updateBullets(dt) {
         break;
       }
     }
-    if (!hit && bullet.y < -20) game.bullets.splice(i, 1);
+    if (!hit && (bullet.y < -20 || bullet.y > view.height + 20 || bullet.x < -30 || bullet.x > view.width + 30)) {
+      game.bullets.splice(i, 1);
+    }
   }
 }
 
@@ -683,6 +911,16 @@ function updateEnemies(dt) {
   for (let i = game.enemies.length - 1; i >= 0; i -= 1) {
     const enemy = game.enemies[i];
     enemy.phase += dt * 2.6;
+    if (enemy.falling) {
+      enemy.y += Math.max(enemy.speed, 380) * dt;
+      enemy.x += (enemy.x < bounds.mid ? -50 : 50) * dt;
+      if (enemy.y > view.height + 40) {
+        game.enemies.splice(i, 1);
+        game.score += enemy.big ? 10 : 5;
+        updateHud();
+      }
+      continue;
+    }
     enemy.y += enemy.speed * dt;
     enemy.x += Math.sin(enemy.phase) * 5 * dt;
     enemy.x = clamp(enemy.x, bounds.innerLeft + enemy.radius, bounds.innerRight - enemy.radius);
@@ -692,7 +930,6 @@ function updateEnemies(dt) {
       enemy.shootTimer -= dt * 1000;
       if (enemy.shootTimer <= 0 && enemy.y > 20 && enemy.y < view.height * 0.72) {
         const angle = Math.atan2(game.player.y - enemy.y, game.player.x - enemy.x);
-        // 敵方射速／彈速固定 2.5 倍，不再隨關卡狂加速
         const bulletSpeed = 210 * FIXED_SPEED_MULT;
         game.enemyBullets.push({
           x: enemy.x,
@@ -718,6 +955,13 @@ function updateEnemyBullets(dt) {
     const bullet = game.enemyBullets[i];
     bullet.x += bullet.vx * dt;
     bullet.y += bullet.vy * dt;
+
+    if (game.shield.active && pointInBox(bullet, shieldRowBox())) {
+      hitShieldPlates(bullet.damage || 1);
+      burst(bullet.x, bullet.y, shieldColor(game.shield.color), 6);
+      game.enemyBullets.splice(i, 1);
+      continue;
+    }
 
     if (distance(bullet, game.player) < bullet.radius + game.player.radius + Math.min(game.squad.length, 4) * 3) {
       game.enemyBullets.splice(i, 1);
@@ -758,6 +1002,16 @@ function collectPickup(pickup) {
     });
     burst(pickup.x, pickup.y, "#ff8ec4", 14);
     floatingNotice("補血！全隊回滿", "#ff8ec4");
+  } else if (pickup.type === "shieldBlue") {
+    activateShield("blue");
+  } else if (pickup.type === "shieldWhite") {
+    activateShield("white");
+  } else if (pickup.type === "shieldRed") {
+    activateShield("red");
+  } else if (pickup.type === "laser") {
+    activateLaser();
+  } else if (pickup.type === "bomb") {
+    activateBomb();
   } else if (pickup.type === "firerate") {
     burst(pickup.x, pickup.y, "#ffe45d", 14);
     floatingNotice(`射速固定 ${FIXED_SPEED_MULT} 倍！`, "#ffe45d");
@@ -781,29 +1035,43 @@ function updateParticles(dt) {
 }
 
 function defeatEnemy(index, enemy) {
+  if (enemy.big) {
+    enemy.falling = true;
+    enemy.speed = 380;
+    enemy.shield = 0;
+    burst(enemy.x, enemy.y, "#9fd8ff", 18);
+    floatingNotice("巨型敵人掉下去了！", "#7ec8ff");
+    return;
+  }
   game.enemies.splice(index, 1);
-  game.score += enemy.big ? 10 : 5;
-  burst(enemy.x, enemy.y, "#ff536d", enemy.big ? 22 : 10);
+  game.score += 5;
+  burst(enemy.x, enemy.y, "#ff536d", 10);
   game.pickups.push({
     x: enemy.x,
     y: enemy.y,
     vx: 0,
     vy: 105,
-    radius: enemy.big ? 15 : 10,
+    radius: 10,
     phase: random(0, 6),
-    type: enemy.big ? "starBig" : "starSmall"
+    type: "starSmall"
   });
   updateHud();
 }
 
 function damageSquad(amount) {
-  if (game.over || game.squad.length === 0) return;
+  if (game.over || game.squad.length === 0 || game.falling) return;
+  if (game.shield.active && hitShieldPlates(amount)) {
+    burst(game.player.x, game.player.y - 30, shieldColor(game.shield.color), 8);
+    updateHud();
+    return;
+  }
   const member = game.squad[game.squad.length - 1];
   member.hp -= amount;
   burst(game.player.x, game.player.y, "#ff536d", 8);
   if (member.hp <= 0) {
     game.squad.pop();
-    floatingNotice("一名隊員倒下了！", "#ff7187");
+    stripWeapons();
+    floatingNotice("一名隊員倒下，槍械回到練習手槍！", "#ff7187");
   }
   updateHud();
   if (game.squad.length === 0) endGame();
@@ -974,6 +1242,9 @@ function updateHud() {
     ui.score.textContent = game.score;
     ui.stars.textContent = game.stars;
     ui.speed.textContent = `${FIXED_SPEED_MULT.toFixed(1)}×`;
+    ui.shield.textContent = game.shield.active ? `${Math.ceil(game.shield.time)}秒` : "關";
+    ui.laser.textContent = game.laser.active ? `${Math.ceil(game.laser.time)}秒` : "關";
+    ui.bomb.textContent = game.bomb.active ? `${game.bomb.time.toFixed(1)}秒` : "關";
     ui.leftDoor.textContent = game.leftDoor.open ? "已開啟" : `${game.leftDoor.hits}/${game.leftDoor.max}`;
     ui.rightDoor.textContent = game.rightDoor.open ? "已開啟" : `${game.rightDoor.hits}/${game.rightDoor.max}`;
   }
@@ -1087,8 +1358,11 @@ function draw() {
   drawDispensers();
   drawPickups();
   drawBullets();
+  drawLaser();
   drawEnemies();
+  drawShield();
   drawSquad();
+  drawBombFuse();
   drawParticles();
 }
 
@@ -1264,6 +1538,11 @@ function drawDispensers() {
 function dispenserInfo(type) {
   if (type === "member") return { title: "加一人", color: "#40d9ff" };
   if (type === "heal") return { title: "補血", color: "#ff8ec4" };
+  if (type === "shieldBlue") return { title: "藍罩", color: "#4db7ff" };
+  if (type === "shieldWhite") return { title: "白罩", color: "#f4f8ff" };
+  if (type === "shieldRed") return { title: "紅罩", color: "#ff536d" };
+  if (type === "laser") return { title: "雷射", color: "#ff6a3c" };
+  if (type === "bomb") return { title: "巨彈", color: "#7ec8ff" };
   return { title: "加射速", color: "#ffe14c" };
 }
 
@@ -1411,6 +1690,69 @@ function drawSquad() {
   }
 }
 
+function pickupLabel(type) {
+  if (type === "member") return "+1";
+  if (type === "heal") return "補";
+  if (type === "shieldBlue") return "藍";
+  if (type === "shieldWhite") return "白";
+  if (type === "shieldRed") return "紅";
+  if (type === "laser") return "雷";
+  if (type === "bomb") return "炸";
+  return "速";
+}
+
+function drawShield() {
+  if (!game.shield.active || !game.shield.plates.length) return;
+  const box = shieldRowBox();
+  const count = game.shield.plates.length;
+  const slotW = box.w / count;
+  const color = shieldColor(game.shield.color);
+  game.shield.plates.forEach((plate, index) => {
+    const x = box.x + index * slotW;
+    ctx.fillStyle = `${color}cc`;
+    ctx.strokeStyle = "#ffffffaa";
+    ctx.lineWidth = 1;
+    ctx.fillRect(x + 1, box.y, slotW - 2, box.h);
+    ctx.strokeRect(x + 1, box.y, slotW - 2, box.h);
+    ctx.fillStyle = "#082033";
+    ctx.font = "800 9px Microsoft JhengHei";
+    ctx.textAlign = "center";
+    ctx.fillText(String(plate.hp), x + slotW / 2, box.y + 12);
+  });
+}
+
+function drawLaser() {
+  if (!game.laser.active) return;
+  const beam = laserBeamBox();
+  const gradient = fireAim === "front"
+    ? ctx.createLinearGradient(beam.x, beam.y + beam.h, beam.x, beam.y)
+    : fireAim === "left"
+      ? ctx.createLinearGradient(beam.x + beam.w, beam.y, beam.x, beam.y)
+      : ctx.createLinearGradient(beam.x, beam.y, beam.x + beam.w, beam.y);
+  gradient.addColorStop(0, "#ff2a1a");
+  gradient.addColorStop(0.35, "#ff4d2e");
+  gradient.addColorStop(1, "#ffb347");
+  ctx.save();
+  ctx.globalAlpha = 0.86;
+  ctx.shadowBlur = 22;
+  ctx.shadowColor = "#ff4d2e";
+  ctx.fillStyle = gradient;
+  ctx.fillRect(beam.x, beam.y, beam.w, beam.h);
+  ctx.restore();
+}
+
+function drawBombFuse() {
+  if (!game.bomb.active) return;
+  ctx.save();
+  ctx.fillStyle = "#7ec8ff";
+  ctx.font = "900 22px Microsoft JhengHei";
+  ctx.textAlign = "center";
+  ctx.shadowBlur = 18;
+  ctx.shadowColor = "#4db7ff";
+  ctx.fillText("1", game.player.x, game.player.y - 52);
+  ctx.restore();
+}
+
 function drawBullets() {
   game.bullets.forEach((bullet) => {
     ctx.shadowBlur = 12;
@@ -1473,7 +1815,7 @@ function drawPickups() {
     ctx.fillStyle = "#0d2138";
     ctx.font = "900 9px Microsoft JhengHei";
     ctx.textAlign = "center";
-    ctx.fillText(pickup.type === "member" ? "+1" : pickup.type === "heal" ? "補" : "速", pickup.x, pickup.y + 3);
+    ctx.fillText(pickupLabel(pickup.type), pickup.x, pickup.y + 3);
   });
 }
 
