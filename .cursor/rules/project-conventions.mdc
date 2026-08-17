@@ -24,17 +24,19 @@ alwaysApply: true
 
 ## Git 工作流程（本專案覆寫預設「勿自動 commit」）
 
+**只在 `main` branch 上工作**，不要開 feature branch、不要開 PR。
+
 每次完成檔案修改後，Agent **必須**：
 
-1. 自動產生簡潔的 commit message（可用繁中或英文，重點清楚說明「為什麼」）。
-2. `git add` 相關變更並 `commit`。
-3. `git push` 到 GitHub 的 **`main`** branch。
+1. 依本次修改自動摘要，產生簡潔的 commit message（繁中或英文皆可，一句說清楚改了什麼、為什麼）。
+2. `git checkout main`（若不在 main），`git add` 相關變更並 `commit`。
+3. `git push origin main`。
 
 注意：
 
 - 不要等待使用者再說一次「請 commit／push」。
 - 不要把含有密鑰的檔案（如 `.env`）提交上去。
-- 推送目標固定為 `origin/main`。
+- 推送目標固定為 `origin/main`，不要 push 到其他 branch。
 
 ## 主畫面更新時間
 
