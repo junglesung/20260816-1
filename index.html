@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#07162d">
   <title>藍紅小隊大對決</title>
-  <link rel="stylesheet" href="styles.css?v=202608170759">
+  <link rel="stylesheet" href="styles.css?v=202608170836">
 </head>
 <body>
   <main class="app">
     <section id="startScreen" class="start-screen" aria-labelledby="gameTitle">
-      <p id="updateStamp" class="update-stamp" aria-label="程式更新時間">更新時間：2026/08/17 07:59</p>
+      <p id="updateStamp" class="update-stamp" aria-label="程式更新時間">更新時間：2026/08/17 08:36</p>
       <div class="hero-card">
         <p class="eyebrow">小隊射擊闖關遊戲</p>
         <h1 id="gameTitle">
@@ -36,7 +36,7 @@
         <div class="progress-row">
           <div><span>目前章節</span><strong id="homeLevel">1</strong></div>
           <div><span>累積分數</span><strong id="homeScore">0</strong></div>
-          <div><span>收集星星</span><strong id="homeStars">0</strong></div>
+          <div><span>收集星星</span><strong id="homeStars">100</strong></div>
           <div><span>CC</span><strong id="homeCC">1</strong></div>
         </div>
 
@@ -52,13 +52,15 @@
             <li><span>🔴</span> 雷射 10 秒、傷害 7，一排打過去，前面紅後面橘。</li>
             <li><span>💣</span> 巨型炸彈 1 秒後砰，巨人會掉下去，並把防護罩變成藍色。</li>
             <li><span>⚡</span> 射速固定 2.5 倍，我方子彈 1.5 倍；小隊改為慢走，滑鼠拖曳也不會瞬移。</li>
+            <li><span>⭐</span> 一開始有 100 顆星星，戰鬥可一直打、關卡也會再給一些；最多可存到 1120 萬。</li>
+            <li><span>🔫</span> 升級中心可以選槍，每把都是 50 星。每個地方都有測炮，買之前就能試打。</li>
             <li><span>🛒</span> 主畫面有商店小格子（藍／白／紅／雷／彈），選好按彩虹購買（各 1 星）；進關後上方五格點一下才播出。</li>
             <li><span>⌨️</span> 鍵盤快捷（各 1 星）：1 前面、2 後面、3 左邊、4 右邊；5 或空白加速；6 防護罩、7 雷射、8 巨型炸彈、9 加一人；0 補血、Q 子彈加速。</li>
             <li><span>❤️</span> 一個人上面顯示 50 滴血，兩個人大約 100 滴。點下一關會把物資接著帶下去，直到沒有關卡。</li>
             <li><span>🧱</span> 旁邊有兩道石牆：不想玩會把這組剩下的關去掉；另一道牆繼續玩。</li>
             <li><span>🗺️</span> 選章節後再分成多組，每組 10 關。</li>
           </ul>
-          <p class="tip">操作：← → ↓ 或 A D S 移動；1 前、2 後、3 左、4 右切換射擊方向；5／空白加速；6–9、0、Q 用星星購買能力。</p>
+          <p class="tip">操作：← → ↓ 或 A D S 移動；升級中心可花 50 星選槍並測炮。1 前、2 後、3 左、4 右切換射擊方向；5／空白加速；6–9、0、Q 用星星購買能力。</p>
         </section>
 
         <section class="chapter-panel" aria-labelledby="chapterListTitle">
@@ -80,7 +82,7 @@
 
         <div class="home-actions">
           <button id="shopButton" class="ghost-button rainbow-shop-button" type="button">🛒 商店</button>
-          <button id="arsenalButton" class="ghost-button" type="button">🔫 武器庫</button>
+          <button id="arsenalButton" class="ghost-button" type="button" data-open-upgrade>🔫 升級／測炮</button>
           <button id="resetButton" class="ghost-button" type="button">🔄 從第一關重來</button>
         </div>
       </div>
@@ -89,7 +91,10 @@
     <section id="packSelectScreen" class="stage-select-screen" hidden aria-labelledby="packSelectTitle">
       <div class="stage-select-card">
         <header class="stage-select-header">
-          <button id="backToHomeFromPackButton" class="ghost-button" type="button">← 回主畫面</button>
+          <div class="stage-select-nav">
+            <button id="backToHomeFromPackButton" class="ghost-button" type="button">← 回主畫面</button>
+            <button class="ghost-button range-entry" type="button" data-open-upgrade>測炮</button>
+          </div>
           <div class="stage-select-heading">
             <h2 id="packSelectTitle">第 1 章 · 關卡組</h2>
             <p id="packSelectHint" class="panel-hint">每一組有 10 關，依序解鎖，直到本章全部關卡用完。</p>
@@ -102,7 +107,10 @@
     <section id="stageSelectScreen" class="stage-select-screen" hidden aria-labelledby="stageSelectTitle">
       <div class="stage-select-card">
         <header class="stage-select-header">
-          <button id="backToPackButton" class="ghost-button" type="button">← 回關卡組</button>
+          <div class="stage-select-nav">
+            <button id="backToPackButton" class="ghost-button" type="button">← 回關卡組</button>
+            <button class="ghost-button range-entry" type="button" data-open-upgrade>測炮</button>
+          </div>
           <div class="stage-select-heading">
             <h2 id="stageSelectTitle">第 1 組</h2>
             <p id="stageSelectHint" class="panel-hint">這一組共 10 關，可自由挑選挑戰。</p>
@@ -154,7 +162,7 @@
           </div>
         </div>
         <button id="openShop" class="mc-mini-btn rainbow-shop-button" type="button">商店</button>
-        <button id="openArsenal" class="mc-mini-btn" type="button">武器庫</button>
+        <button id="openArsenal" class="mc-mini-btn" type="button" data-open-upgrade>升級測炮</button>
       </div>
       <div id="itemHotbar" class="mc-hotbar" aria-label="道具格子，點一下就會播出"></div>
 
@@ -189,15 +197,24 @@
       <p>左右鐵門各需 100 發打開。打開後會橫向衝出加人、補血與加強戰；加一人的是 2.5 倍速度。這些補給只有 50 滴血，每打中一次扣 5 滴。</p>
       <p>射速固定 2.5 倍，我方子彈 1.5 倍；小隊改為慢走。</p>
       <p>商店有藍罩、白罩、紅罩、雷射、巨彈；選好按彩虹購買（各 1 星），進關後點上方五格播出。巨彈砰了才變藍罩。</p>
+      <p>星星一開始 100 顆，戰鬥可一直打、關卡也會再給；最多存 1120 萬。升級中心的槍一律 50 星，每個地方都有測炮。</p>
       <p>鍵盤快捷（各 1 星）：1 前面、2 後面、3 左邊、4 右邊；5 或空白加速；6 防護罩、7 雷射、8 巨型炸彈、9 加一人；0 補血、Q 子彈加速。</p>
       <p>選章節後分成多組，每組 10 關。</p>
     </dialog>
 
-    <dialog id="arsenalDialog">
-      <button class="dialog-close" type="button" data-close="arsenalDialog" aria-label="關閉武器庫">×</button>
-      <h2 class="rainbow-text">武器庫</h2>
-      <p class="arsenal-hint">每過一關輪流獲得新槍與新子彈，點擊已取得的項目即可裝備。</p>
-      <div id="arsenalBody" class="arsenal-body"></div>
+    <dialog id="arsenalDialog" class="upgrade-dialog">
+      <button class="dialog-close" type="button" data-close="arsenalDialog" aria-label="關閉升級中心">×</button>
+      <h2 class="rainbow-text">升級中心</h2>
+      <p class="arsenal-hint">星星可一直打、最多存 1120 萬。槍一律 50 星，下面測炮場每個地方都能進來試打。</p>
+      <p class="arsenal-hint">目前星星：<strong id="upgradeStars">100</strong></p>
+      <div class="upgrade-layout">
+        <div class="range-panel">
+          <p class="range-title">測炮場</p>
+          <canvas id="rangeCanvas" width="320" height="180" aria-label="測炮場，自動試射目前選的槍"></canvas>
+          <p id="rangeStatus" class="range-status">測炮中：練習手槍</p>
+        </div>
+        <div id="arsenalBody" class="arsenal-body"></div>
+      </div>
     </dialog>
 
     <dialog id="shopDialog" class="mc-dialog">
@@ -209,6 +226,6 @@
     </dialog>
   </main>
 
-  <script src="game.js?v=202608170759"></script>
+  <script src="game.js?v=202608170836"></script>
 </body>
 </html>

@@ -12,6 +12,10 @@ const arsenalDialog = document.querySelector("#arsenalDialog");
 const arsenalBody = document.querySelector("#arsenalBody");
 const shopDialog = document.querySelector("#shopDialog");
 const shopBody = document.querySelector("#shopBody");
+const rangeCanvas = document.querySelector("#rangeCanvas");
+const rangeCtx = rangeCanvas?.getContext("2d");
+const rangeStatus = document.querySelector("#rangeStatus");
+const upgradeStars = document.querySelector("#upgradeStars");
 const itemHotbar = document.querySelector("#itemHotbar");
 const skipWallButton = document.querySelector("#skipWallButton");
 const continueWallButton = document.querySelector("#continueWallButton");
@@ -60,6 +64,9 @@ const CARRIER_SPEED = 88;
 const BATTLE_BOOST_TIME = 8;
 const SPRINT_BOOST_TIME = 6;
 const STAR_POWER_COST = 1;
+const STAR_CAP = 11200000;
+const STAR_START = 100;
+const GUN_COST = 50;
 const SHOP_ROOM_SLOTS = 27;
 const HOTBAR_SLOTS = 9;
 const SHIELD_PLATES = [12, 9, 13, 6, 5, 4, 3, 2, 1];
@@ -117,6 +124,10 @@ let view = { width: 900, height: 620, dpr: 1 };
 let lastFrame = 0;
 let animationId = 0;
 let game = null;
+let previewGunIndex = 0;
+let rangeState = null;
+let rangeAnim = 0;
+let rangePausedGame = false;
 
 function chapterGoal(chapter) {
   return chapter * 100;
@@ -167,8 +178,9 @@ function normalizeChapterCleared(raw, legacyLevel) {
 function loadProgress() {
   const fallback = {
     score: 0,
-    stars: 0,
+    stars: STAR_START,
     gunsOwned: 1,
+    ownedGuns: [0],
     ammosOwned: 1,
     gunIndex: 0,
     ammoIndex: 0,
@@ -181,7 +193,8 @@ function loadProgress() {
     rightWallCleared: false,
     cc: 1,
     shopItem: null,
-    shopRoom: []
+    shopRoom: [],
+    starStartGranted: true
   };
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
@@ -190,10 +203,14 @@ function loadProgress() {
     const chapter = clamp(Number(saved.chapter) || 1, 1, MAX_CHAPTER);
     const maxSub = chapterGoal(chapter);
     const subLevel = clamp(Number(saved.subLevel) || Math.min(chapterCleared[chapter - 1] + 1, maxSub), 1, maxSub);
+    const stars = saved.starStartGranted
+      ? clampStars(saved.stars)
+      : clampStars(Math.max(STAR_START, Number(saved.stars) || 0));
     return {
       score: Math.max(0, Number(saved.score) || 0),
-      stars: Math.max(0, Number(saved.stars) || 0),
+      stars,
       gunsOwned: clamp(Number(saved.gunsOwned) || 1, 1, guns.length),
+      ownedGuns: normalizeOwnedGuns(saved),
       ammosOwned: clamp(Number(saved.ammosOwned) || 1, 1, ammos.length),
       gunIndex: clamp(Number(saved.gunIndex) || 0, 0, guns.length - 1),
       ammoIndex: clamp(Number(saved.ammoIndex) || 0, 0, ammos.length - 1),
@@ -206,11 +223,25 @@ function loadProgress() {
       rightWallCleared: Boolean(saved.rightWallCleared),
       cc: saved.cc == null ? 1 : Math.max(0, Number(saved.cc) || 0),
       shopItem: null,
-      shopRoom: normalizeShopRoom(saved)
+      shopRoom: normalizeShopRoom(saved),
+      starStartGranted: true
     };
   } catch (error) {
     return fallback;
   }
+}
+
+function normalizeOwnedGuns(saved) {
+  const allowed = guns.map((_, index) => index);
+  let owned = Array.isArray(saved?.ownedGuns)
+    ? saved.ownedGuns.map((value) => Number(value)).filter((index) => allowed.includes(index))
+    : [];
+  if (!owned.length) {
+    const count = clamp(Number(saved?.gunsOwned) || 1, 1, guns.length);
+    owned = Array.from({ length: count }, (_, index) => index);
+  }
+  if (!owned.includes(0)) owned.unshift(0);
+  return [...new Set(owned)].sort((a, b) => a - b);
 }
 
 function normalizeShopRoom(saved) {
@@ -248,20 +279,58 @@ function hasStarPickups() {
 }
 
 function trySpendStar() {
-  const available = game ? game.stars : progress.stars;
-  if ((available || 0) < STAR_POWER_COST) {
-    floatingNotice("星星不夠！需要 1 顆", "#ffd83d");
+  return spendStars(STAR_POWER_COST);
+}
+
+function clampStars(value) {
+  return Math.max(0, Math.min(STAR_CAP, Math.floor(Number(value) || 0)));
+}
+
+function formatStars(value) {
+  const n = clampStars(value);
+  if (n >= 10000) {
+    const wan = n / 10000;
+    const text = Number.isInteger(wan) ? String(wan) : wan.toFixed(1).replace(/\.0$/, "");
+    return `${text}萬`;
+  }
+  return String(n);
+}
+
+function currentStars() {
+  return clampStars(game ? game.stars : progress.stars);
+}
+
+function syncStars(value) {
+  const next = clampStars(value);
+  progress.stars = next;
+  if (game) game.stars = next;
+  return next;
+}
+
+function addStars(amount) {
+  if (!(amount > 0)) return 0;
+  const before = currentStars();
+  const gained = syncStars(before + amount) - before;
+  saveProgress();
+  return gained;
+}
+
+function spendStars(cost) {
+  const need = Math.max(0, Math.floor(Number(cost) || 0));
+  const available = currentStars();
+  if (available < need) {
+    floatingNotice(`星星不夠！需要 ${need} 顆`, "#ffd83d");
     return false;
   }
-  if (game) {
-    game.stars -= STAR_POWER_COST;
-    progress.stars = game.stars;
-  } else {
-    progress.stars -= STAR_POWER_COST;
-  }
+  syncStars(available - need);
   saveProgress();
   updateHud();
   return true;
+}
+
+function ownsGun(index) {
+  if (!Array.isArray(progress.ownedGuns)) progress.ownedGuns = normalizeOwnedGuns(progress);
+  return progress.ownedGuns.includes(index);
 }
 
 function useStarSprint() {
@@ -319,11 +388,13 @@ function useStarBulletBoost() {
 
 function grantStars(amount, x, y) {
   if (!game || amount <= 0) return;
-  game.stars += amount;
-  progress.stars = game.stars;
-  saveProgress();
-  if (x != null && y != null) burst(x, y, "#ffd83d", amount >= 5 ? 18 : 12);
-  floatingNotice(`星星 +${amount}`, "#ffd83d");
+  const gained = addStars(amount);
+  if (x != null && y != null) burst(x, y, "#ffd83d", gained >= 5 ? 18 : 12);
+  if (gained <= 0) {
+    floatingNotice("星星已存滿 1120 萬", "#ffd83d");
+  } else {
+    floatingNotice(`星星 +${gained}`, "#ffd83d");
+  }
   updateHud();
 }
 
@@ -367,7 +438,8 @@ function randomClearQuote() {
 }
 
 function currentGun() {
-  return guns[Math.min(progress.gunIndex, progress.gunsOwned - 1)];
+  const index = ownsGun(progress.gunIndex) ? progress.gunIndex : 0;
+  return guns[index];
 }
 
 function currentAmmo() {
@@ -383,7 +455,7 @@ function makeGame(chapter, subLevel) {
     chapter,
     subLevel,
     score: progress.score,
-    stars: progress.stars,
+    stars: clampStars(progress.stars),
     squad: [{ hp: MEMBER_HP, maxHp: MEMBER_HP }],
     player: { x: view.width / 2, y: view.height - 52, radius: 12 },
     bullets: [],
@@ -616,6 +688,7 @@ function beginLevel() {
   game.player.y = view.height - 52;
   game.player.radius = 12;
   game.player.x = clamp(game.player.x, bounds.innerLeft + 16, bounds.innerRight - 16);
+  spawnLevelBonusStars();
   pauseButton.textContent = "Ⅱ";
   clearPraise();
   hideMessage();
@@ -813,8 +886,6 @@ function startFalling() {
 }
 
 function stripWeapons() {
-  progress.gunsOwned = 1;
-  progress.ammosOwned = 1;
   progress.gunIndex = 0;
   progress.ammoIndex = 0;
   saveProgress();
@@ -1162,13 +1233,10 @@ function buyShopItem(id) {
     renderShop();
     return;
   }
-  if ((progress.stars || 0) < STAR_POWER_COST) {
-    floatingNotice("星星不夠！需要 1 顆", "#ffd83d");
+  if (!spendStars(STAR_POWER_COST)) {
     renderShop();
     return;
   }
-  progress.stars -= STAR_POWER_COST;
-  if (game) game.stars = progress.stars;
   progress.shopRoom.push(item.id);
   saveProgress();
   renderShop();
@@ -1181,7 +1249,7 @@ function buyShopItem(id) {
 function renderShop() {
   if (!shopBody) return;
   if (!Array.isArray(progress.shopRoom)) progress.shopRoom = [];
-  if (ui.shopCC) ui.shopCC.textContent = String(progress.stars || 0);
+  if (ui.shopCC) ui.shopCC.textContent = formatStars(currentStars());
   if (ui.shopOwned) ui.shopOwned.textContent = roomItemSummary();
   const shopSlots = Array.from({ length: 9 }, (_, index) => {
     const item = SHOP_ITEMS[index];
@@ -1605,7 +1673,7 @@ function collectPickup(pickup) {
     floatingNotice("加強戰！射速再提升", "#ffe45d");
   } else if (isStarPickup(pickup)) {
     if (!pickup.cosmetic) {
-      grantStars(pickup.type === "starBig" ? 5 : 1, pickup.x, pickup.y);
+      grantStars(pickup.amount || (pickup.type === "starBig" ? 5 : 1), pickup.x, pickup.y);
     }
   } else {
     burst(pickup.x, pickup.y, "#ffd83d", 8);
@@ -1624,19 +1692,43 @@ function updateParticles(dt) {
   }
 }
 
+function dropStarPickup(x, y, amount, cosmetic = false) {
+  const value = Math.max(1, Math.floor(amount || 1));
+  const big = value >= 5;
+  game.pickups.push({
+    x,
+    y,
+    vx: random(-28, 28),
+    vy: random(70, 120),
+    radius: big ? 14 : 10,
+    phase: random(0, 6),
+    type: big ? "starBig" : "starSmall",
+    amount: value,
+    cosmetic
+  });
+}
+
+function spawnLevelBonusStars() {
+  if (!game) return;
+  const bounds = arena();
+  const extra = 3 + Math.min(4, Math.floor(game.chapter / 2));
+  for (let i = 0; i < extra; i += 1) {
+    dropStarPickup(
+      random(bounds.innerLeft + 18, bounds.innerRight - 18),
+      random(view.height * 0.12, view.height * 0.42),
+      i === 0 ? 5 : 1
+    );
+  }
+}
+
+function levelStarBonus(chapter, subLevel) {
+  return 12 + chapter * 4 + Math.ceil(subLevel / 3);
+}
+
 function defeatEnemy(index, enemy) {
   if (enemy.big) {
-    grantStars(5, enemy.x, enemy.y);
-    game.pickups.push({
-      x: enemy.x,
-      y: enemy.y,
-      vx: 0,
-      vy: 70,
-      radius: 14,
-      phase: random(0, 6),
-      type: "starBig",
-      cosmetic: true
-    });
+    grantStars(8, enemy.x, enemy.y);
+    dropStarPickup(enemy.x, enemy.y, 5, true);
     enemy.falling = true;
     enemy.speed = 380;
     enemy.shield = 0;
@@ -1647,15 +1739,10 @@ function defeatEnemy(index, enemy) {
   game.enemies.splice(index, 1);
   game.score += 5;
   burst(enemy.x, enemy.y, "#ff536d", 10);
-  game.pickups.push({
-    x: enemy.x,
-    y: enemy.y,
-    vx: 0,
-    vy: 105,
-    radius: 10,
-    phase: random(0, 6),
-    type: "starSmall"
-  });
+  dropStarPickup(enemy.x, enemy.y, 1);
+  if (Math.random() < 0.45) {
+    dropStarPickup(enemy.x + random(-16, 16), enemy.y - 8, 1);
+  }
   updateHud();
 }
 
@@ -1679,20 +1766,15 @@ function damageSquad(amount) {
 }
 
 function grantLevelReward(completedCount) {
-  if (completedCount % 2 === 1) {
-    if (progress.gunsOwned < guns.length) {
-      progress.gunsOwned += 1;
-      progress.gunIndex = progress.gunsOwned - 1;
-      return `獲得新槍「${guns[progress.gunIndex].name}」！`;
+  if (completedCount % 2 === 0) {
+    if (progress.ammosOwned < ammos.length) {
+      progress.ammosOwned += 1;
+      progress.ammoIndex = progress.ammosOwned - 1;
+      return `獲得新子彈「${ammos[progress.ammoIndex].name}」！`;
     }
-    return "所有槍械都已收集完成！";
+    return "所有子彈都已收集完成！";
   }
-  if (progress.ammosOwned < ammos.length) {
-    progress.ammosOwned += 1;
-    progress.ammoIndex = progress.ammosOwned - 1;
-    return `獲得新子彈「${ammos[progress.ammoIndex].name}」！`;
-  }
-  return "所有子彈都已收集完成！";
+  return "槍可以到升級中心花 50 星選購。";
 }
 
 function totalClearedSubLevels() {
@@ -1705,9 +1787,11 @@ function completeLevel() {
   const completedSub = game.subLevel;
   const goal = chapterGoal(chapter);
   const isNewClear = completedSub > getChapterCleared(chapter);
-  const rewardText = isNewClear
+  const starBonus = isNewClear ? levelStarBonus(chapter, completedSub) : Math.max(4, chapter + 2);
+  const gainedStars = addStars(starBonus);
+  const rewardText = `${isNewClear
     ? grantLevelReward(totalClearedSubLevels() + 1)
-    : "這小關已通關過，繼續前進吧！";
+    : "這小關已通關過，繼續前進吧！"}<br>關卡星星 +${gainedStars}`;
 
   if (isNewClear) {
     setChapterCleared(chapter, completedSub);
@@ -1735,7 +1819,7 @@ function completeLevel() {
       : "";
     showMessage(
       `第 ${chapter} 章完成！`,
-      `${rewardText}<br>你打完了全部 ${goal} 小關。${unlockText}<br>目前分數 ${game.score} 分、星星 ${game.stars} 顆。`,
+      `${rewardText}<br>你打完了全部 ${goal} 小關。${unlockText}<br>目前分數 ${game.score} 分、星星 ${formatStars(game.stars)}。`,
       unlockedNext ? "前往下一章" : "回到關卡列表",
       () => {
         if (unlockedNext) openStageSelect(nextChapter);
@@ -1748,7 +1832,7 @@ function completeLevel() {
   if (completedSub >= goal) {
     showMessage(
       `第 ${chapter} 章 · 第 ${completedSub} 關完成！`,
-      `${rewardText}<br>${randomClearQuote()}<br>這一章已全部打通。<br>目前分數 ${game.score} 分、星星 ${game.stars} 顆。`,
+      `${rewardText}<br>${randomClearQuote()}<br>這一章已全部打通。<br>目前分數 ${game.score} 分、星星 ${formatStars(game.stars)}。`,
       "回到關卡列表",
       () => returnToHome()
     );
@@ -1759,7 +1843,7 @@ function completeLevel() {
   const nextPack = packOfSubLevel(completedSub + 1);
   showMessage(
     `第 ${chapter} 章 · 第 ${completedSub} 關完成！`,
-    `${rewardText}<br>${randomClearQuote()}<br>進度 ${getChapterCleared(chapter)} / ${goal}${finishedPack ? `<br>已解鎖第 ${nextPack} 組！` : ""}<br>目前分數 ${game.score} 分、星星 ${game.stars} 顆。`,
+    `${rewardText}<br>${randomClearQuote()}<br>進度 ${getChapterCleared(chapter)} / ${goal}${finishedPack ? `<br>已解鎖第 ${nextPack} 組！` : ""}<br>目前分數 ${game.score} 分、星星 ${formatStars(game.stars)}。`,
     finishedPack ? "前往下一組" : "進入下一關",
     () => {
       if (finishedPack) {
@@ -1794,7 +1878,7 @@ function showVictory() {
   showPraise();
   showMessage(
     "全部通關！",
-    `你打通了第 ${MAX_CHAPTER} 章的大巨人軍團！<br>總分 ${game.score} 分、星星 ${game.stars} 顆。`,
+    `你打通了第 ${MAX_CHAPTER} 章的大巨人軍團！<br>總分 ${game.score} 分、星星 ${formatStars(game.stars)}。`,
     "回到主畫面",
     () => returnToHome()
   );
@@ -1841,7 +1925,7 @@ function updateHud() {
     ui.level.textContent = `${game.chapter}-${game.subLevel}`;
     ui.squad.textContent = `${game.squad.length}／${Math.ceil(squadHpTotal())}`;
     ui.score.textContent = game.score;
-    ui.stars.textContent = game.stars;
+    ui.stars.textContent = formatStars(game.stars);
     ui.speed.textContent = game.battleBoost > 0
       ? `${(FIXED_SPEED_MULT * PLAYER_BULLET_MULT).toFixed(1)}×`
       : `${FIXED_SPEED_MULT.toFixed(1)}×`;
@@ -1860,7 +1944,8 @@ function updateHud() {
 function updateHomeInfo() {
   ui.homeLevel.textContent = `${highestUnlockedChapter()}`;
   ui.homeScore.textContent = progress.score;
-  ui.homeStars.textContent = progress.stars;
+  ui.homeStars.textContent = formatStars(progress.stars);
+  if (upgradeStars) upgradeStars.textContent = formatStars(currentStars());
   if (ui.homeCC) ui.homeCC.textContent = String(progress.cc || 0);
 }
 
@@ -2431,7 +2516,7 @@ function drawPickups() {
       ctx.fillStyle = "#4a3400";
       ctx.font = "900 9px Microsoft JhengHei";
       ctx.textAlign = "center";
-      ctx.fillText(big ? "5" : "1", pickup.x, pickup.y + 3.5);
+      ctx.fillText(String(pickup.amount || (big ? 5 : 1)), pickup.x, pickup.y + 3.5);
       return;
     }
 
@@ -2557,8 +2642,9 @@ function returnToStart() {
 function resetProgress() {
   progress = {
     score: 0,
-    stars: 0,
+    stars: STAR_START,
     gunsOwned: 1,
+    ownedGuns: [0],
     ammosOwned: 1,
     gunIndex: 0,
     ammoIndex: 0,
@@ -2571,9 +2657,11 @@ function resetProgress() {
     rightWallCleared: false,
     cc: 1,
     shopItem: null,
-    shopRoom: []
+    shopRoom: [],
+    starStartGranted: true
   };
   selectedChapter = 1;
+  previewGunIndex = 0;
   saveProgress();
   updateHomeInfo();
   renderChapterList();
@@ -2592,10 +2680,26 @@ function setDirection(direction, pressed) {
 }
 
 function renderArsenal() {
+  if (!Array.isArray(progress.ownedGuns)) progress.ownedGuns = normalizeOwnedGuns(progress);
+  if (upgradeStars) upgradeStars.textContent = formatStars(currentStars());
   const gunRows = guns.map((gun, index) => {
-    const owned = index < progress.gunsOwned;
-    const equipped = index === Math.min(progress.gunIndex, progress.gunsOwned - 1);
-    return arsenalRow("gun", index, gun.name, gun.power, guns.length, owned, equipped, `傷害 ${gun.damage}`);
+    const owned = ownsGun(index);
+    const equipped = owned && progress.gunIndex === index;
+    const testing = previewGunIndex === index;
+    const costText = index === 0 ? "免費" : `${GUN_COST} 星`;
+    const action = owned
+      ? `<button class="upgrade-mini" type="button" data-gun-act="equip" data-index="${index}">${equipped ? "使用中" : "裝備"}</button>`
+      : `<button class="upgrade-mini buy" type="button" data-gun-act="buy" data-index="${index}">買下來</button>`;
+    return `
+      <div class="arsenal-item gun-card${owned ? "" : " locked"}${equipped ? " equipped" : ""}${testing ? " testing" : ""}">
+        <span class="arsenal-name">${gun.name}</span>
+        <span class="arsenal-dots">${"●".repeat(gun.power)}${"○".repeat(guns.length - gun.power)}</span>
+        <span class="arsenal-detail">傷害 ${gun.damage}　射速 ${gun.fire}ms　${costText}</span>
+        <div class="upgrade-actions">
+          ${action}
+          <button class="upgrade-mini test" type="button" data-gun-act="test" data-index="${index}">測炮</button>
+        </div>
+      </div>`;
   }).join("");
 
   const ammoRows = ammos.map((ammo, index) => {
@@ -2605,9 +2709,9 @@ function renderArsenal() {
   }).join("");
 
   arsenalBody.innerHTML = `
-    <h3>槍械（單數關獲得）</h3>
+    <h3>槍械（各 50 星，練習手槍免費）</h3>
     <div class="arsenal-list">${gunRows}</div>
-    <h3>子彈（雙數關獲得）</h3>
+    <h3>子彈（過關解鎖後可裝備）</h3>
     <div class="arsenal-list">${ammoRows}</div>`;
 }
 
@@ -2621,6 +2725,186 @@ function arsenalRow(kind, index, name, power, max, owned, equipped, detail) {
       <span class="arsenal-detail">${owned ? detail : "通關後解鎖"}</span>
       ${equipped ? '<span class="arsenal-badge">使用中</span>' : ""}
     </button>`;
+}
+
+function previewGun() {
+  return guns[clamp(previewGunIndex, 0, guns.length - 1)];
+}
+
+function setPreviewGun(index) {
+  previewGunIndex = clamp(index, 0, guns.length - 1);
+  if (rangeStatus) {
+    rangeStatus.textContent = `測炮中：${previewGun().name}${ownsGun(previewGunIndex) ? "" : "（試打，尚未購買）"}`;
+  }
+  renderArsenal();
+}
+
+function buyGun(index) {
+  if (index === 0 || ownsGun(index)) {
+    progress.gunIndex = index;
+    progress.gunsOwned = Math.max(progress.gunsOwned || 1, index + 1);
+    saveProgress();
+    setPreviewGun(index);
+    updateHud();
+    floatingNotice(`已裝備「${guns[index].name}」`, "#9fd8ff");
+    return;
+  }
+  if (!spendStars(GUN_COST)) return;
+  progress.ownedGuns.push(index);
+  progress.ownedGuns = normalizeOwnedGuns(progress);
+  progress.gunIndex = index;
+  progress.gunsOwned = Math.max(progress.gunsOwned || 1, progress.ownedGuns.length);
+  saveProgress();
+  setPreviewGun(index);
+  updateHud();
+  floatingNotice(`已購買「${guns[index].name}」`, "#ffd83d");
+}
+
+function openUpgradeCenter() {
+  if (game && game.running && !game.paused && !game.over && !game.betweenLevels) {
+    game.paused = true;
+    rangePausedGame = true;
+  }
+  previewGunIndex = ownsGun(progress.gunIndex) ? progress.gunIndex : 0;
+  renderArsenal();
+  arsenalDialog.showModal();
+  setPreviewGun(previewGunIndex);
+  requestAnimationFrame(startRange);
+}
+
+function closeUpgradeSideEffects() {
+  stopRange();
+  if (rangePausedGame && game && !game.over && !game.betweenLevels) {
+    game.paused = false;
+    lastFrame = performance.now();
+  }
+  rangePausedGame = false;
+}
+
+function startRange() {
+  if (!rangeCanvas || !rangeCtx) return;
+  stopRange();
+  const rect = rangeCanvas.getBoundingClientRect();
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  const w = Math.max(220, rect.width || 280);
+  const h = Math.max(150, rect.height || 180);
+  rangeCanvas.width = Math.round(w * dpr);
+  rangeCanvas.height = Math.round(h * dpr);
+  rangeCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  rangeState = {
+    w,
+    h,
+    bullets: [],
+    targets: [
+      { x: w * 0.22, y: 38, vx: 52, hp: 90, max: 90 },
+      { x: w * 0.5, y: 26, vx: -66, hp: 140, max: 140 },
+      { x: w * 0.78, y: 46, vx: 44, hp: 90, max: 90 }
+    ],
+    lastShot: 0,
+    hits: 0,
+    last: performance.now()
+  };
+  rangeAnim = requestAnimationFrame(loopRange);
+}
+
+function stopRange() {
+  cancelAnimationFrame(rangeAnim);
+  rangeAnim = 0;
+  rangeState = null;
+}
+
+function loopRange(now) {
+  rangeAnim = requestAnimationFrame(loopRange);
+  if (!rangeState || !arsenalDialog.open) {
+    stopRange();
+    return;
+  }
+  const dt = Math.min((now - rangeState.last) / 1000, 0.04);
+  rangeState.last = now;
+  updateRange(dt, now);
+  drawRange();
+}
+
+function updateRange(dt, now) {
+  const gun = previewGun();
+  const ammo = currentAmmo();
+  if (now - rangeState.lastShot >= gun.fire) {
+    rangeState.lastShot = now;
+    rangeState.bullets.push({
+      x: rangeState.w / 2,
+      y: rangeState.h - 22,
+      vy: -520,
+      r: ammo.size,
+      color: ammo.color,
+      damage: gun.damage * ammo.multiplier
+    });
+    playSfx("shoot");
+  }
+  for (let i = rangeState.bullets.length - 1; i >= 0; i -= 1) {
+    const bullet = rangeState.bullets[i];
+    bullet.y += bullet.vy * dt;
+    if (bullet.y < -10) {
+      rangeState.bullets.splice(i, 1);
+      continue;
+    }
+    const hit = rangeState.targets.find((target) => (
+      bullet.x > target.x - 16 && bullet.x < target.x + 16 &&
+      bullet.y > target.y - 8 && bullet.y < target.y + 34
+    ));
+    if (hit) {
+      hit.hp -= bullet.damage;
+      rangeState.bullets.splice(i, 1);
+      if (hit.hp <= 0) {
+        rangeState.hits += 1;
+        hit.hp = hit.max;
+        hit.x = random(24, rangeState.w - 24);
+      }
+    }
+  }
+  rangeState.targets.forEach((target) => {
+    target.x += target.vx * dt;
+    if (target.x < 20 || target.x > rangeState.w - 20) {
+      target.vx *= -1;
+      target.x = clamp(target.x, 20, rangeState.w - 20);
+    }
+  });
+}
+
+function drawRange() {
+  if (!rangeCtx || !rangeState) return;
+  const { w, h } = rangeState;
+  rangeCtx.fillStyle = "#102033";
+  rangeCtx.fillRect(0, 0, w, h);
+  rangeCtx.fillStyle = "#16324f";
+  rangeCtx.fillRect(0, h - 18, w, 18);
+  rangeState.targets.forEach((target) => {
+    rangeCtx.fillStyle = "#ff536d";
+    rangeCtx.fillRect(target.x - 12, target.y, 24, 32);
+    rangeCtx.fillStyle = "#ffd0d6";
+    rangeCtx.beginPath();
+    rangeCtx.arc(target.x, target.y - 4, 8, 0, Math.PI * 2);
+    rangeCtx.fill();
+    rangeCtx.fillStyle = "#07162d";
+    rangeCtx.fillRect(target.x - 14, target.y - 16, 28, 5);
+    rangeCtx.fillStyle = "#42e695";
+    rangeCtx.fillRect(target.x - 14, target.y - 16, 28 * clamp(target.hp / target.max, 0, 1), 5);
+  });
+  rangeState.bullets.forEach((bullet) => {
+    rangeCtx.fillStyle = bullet.color;
+    rangeCtx.beginPath();
+    rangeCtx.arc(bullet.x, bullet.y, bullet.r, 0, Math.PI * 2);
+    rangeCtx.fill();
+  });
+  rangeCtx.fillStyle = "#20a7ff";
+  rangeCtx.beginPath();
+  rangeCtx.arc(w / 2, h - 16, 10, 0, Math.PI * 2);
+  rangeCtx.fill();
+  rangeCtx.fillStyle = "#ffd83d";
+  rangeCtx.font = "800 12px Microsoft JhengHei";
+  rangeCtx.textAlign = "left";
+  rangeCtx.fillText(`打中 ${rangeState.hits}`, 8, 16);
+  rangeCtx.textAlign = "right";
+  rangeCtx.fillText(previewGun().name, w - 8, 16);
 }
 
 function roundRect(x, y, width, height, radius) {
@@ -2732,6 +3016,8 @@ function playViolinNote(freq, start, dur) {
   lfo.stop(start + dur + 0.05);
 }
 
+let lastShootSfx = 0;
+
 function playSfx(kind) {
   if (!musicEnabled || !audioCtx || audioCtx.state !== "running" || !sfxGain) return;
   const now = audioCtx.currentTime;
@@ -2740,6 +3026,8 @@ function playSfx(kind) {
   osc.connect(gain);
   gain.connect(sfxGain);
   if (kind === "shoot") {
+    if (now - lastShootSfx < 0.08) return;
+    lastShootSfx = now;
     osc.type = "square";
     osc.frequency.setValueAtTime(920, now);
     osc.frequency.exponentialRampToValueAtTime(240, now + 0.05);
@@ -2846,13 +3134,8 @@ subLevelList.addEventListener("click", (event) => {
   if (!item) return;
   startGame(selectedChapter, Number(item.dataset.subLevel));
 });
-document.querySelector("#arsenalButton").addEventListener("click", () => {
-  renderArsenal();
-  arsenalDialog.showModal();
-});
-document.querySelector("#openArsenal").addEventListener("click", () => {
-  renderArsenal();
-  arsenalDialog.showModal();
+document.querySelectorAll("[data-open-upgrade]").forEach((button) => {
+  button.addEventListener("click", openUpgradeCenter);
 });
 
 document.querySelectorAll(".aim-button").forEach((button) => {
@@ -2870,16 +3153,22 @@ document.querySelectorAll("[data-close]").forEach((button) => {
     if (event.target === dialog) dialog.close();
   });
 });
+arsenalDialog.addEventListener("close", closeUpgradeSideEffects);
 
 arsenalBody.addEventListener("click", (event) => {
-  const item = event.target.closest(".arsenal-item");
-  if (!item || item.disabled) return;
-  const index = Number(item.dataset.index);
-  if (item.dataset.kind === "gun") {
-    progress.gunIndex = index;
-  } else {
-    progress.ammoIndex = index;
+  const gunAct = event.target.closest("[data-gun-act]");
+  if (gunAct) {
+    const index = Number(gunAct.dataset.index);
+    if (gunAct.dataset.gunAct === "test") {
+      setPreviewGun(index);
+      return;
+    }
+    buyGun(index);
+    return;
   }
+  const item = event.target.closest(".arsenal-item");
+  if (!item || item.disabled || item.dataset.kind !== "ammo") return;
+  progress.ammoIndex = Number(item.dataset.index);
   saveProgress();
   renderArsenal();
   updateHud();
@@ -3076,3 +3365,4 @@ renderShop();
 renderItemHotbar();
 ui.gunName.textContent = currentGun().name;
 ui.ammoName.textContent = currentAmmo().name;
+saveProgress();
