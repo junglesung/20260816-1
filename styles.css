@@ -827,8 +827,9 @@ h1 {
 .controls {
   display: flex;
   justify-content: center;
-  gap: 10px;
-  width: min(500px, 100%);
+  flex-wrap: wrap;
+  gap: 8px;
+  width: min(560px, 100%);
   flex-shrink: 0;
   margin: 6px auto 0;
 }
@@ -838,7 +839,8 @@ h1 {
   align-items: center;
   justify-content: center;
   gap: 6px;
-  width: 110px;
+  width: 22%;
+  min-width: 72px;
   min-height: 44px;
   border: 1px solid #ffffff32;
   border-radius: 12px;
@@ -909,6 +911,20 @@ dialog p {
   color: #fff;
   cursor: pointer;
   font-size: 2rem;
+}
+
+.password-input {
+  display: block;
+  width: min(220px, 100%);
+  margin: 8px auto 12px;
+  padding: 10px 12px;
+  border: 3px solid #2b2b2b;
+  background: #f4f8ff;
+  color: #111;
+  font-size: 1.4rem;
+  font-weight: 1000;
+  letter-spacing: .24em;
+  text-align: center;
 }
 
 .upgrade-dialog {

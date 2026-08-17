@@ -108,7 +108,24 @@ const ammos = [
 ];
 
 const STORAGE_KEY = "藍紅小隊進度";
-const keys = { left: false, right: false, back: false };
+const keys = { left: false, right: false, back: false, up: false };
+
+const PLAYER_TINT = "#73dcff";
+const SWORD_DAMAGE = 38;
+const SWORD_RANGE = 56;
+const SWORD_COOLDOWN = 0.36;
+const CONVERT_NEED = 10;
+const FIGHTER_COLORS = [
+  { id: "red", name: "紅", color: "#ff536d" },
+  { id: "orange", name: "橙", color: "#ff8a3d" },
+  { id: "yellow", name: "黃", color: "#ffd83d" },
+  { id: "green", name: "綠", color: "#42e695" },
+  { id: "blue", name: "藍", color: "#4db7ff" },
+  { id: "purple", name: "紫", color: "#b785ff" },
+  { id: "rainbow", name: "彩虹", color: "#ff6fd1" },
+  { id: "black", name: "黑", color: "#2a2a2a" },
+  { id: "white", name: "白", color: "#f4f8ff" }
+];
 
 let progress = loadProgress();
 let selectedChapter = 1;
@@ -192,6 +209,7 @@ function loadProgress() {
     leftWallCleared: false,
     rightWallCleared: false,
     cc: 1,
+    planePassword: "0000",
     shopItem: null,
     shopRoom: [],
     starStartGranted: true
@@ -222,6 +240,7 @@ function loadProgress() {
       leftWallCleared: Boolean(saved.leftWallCleared),
       rightWallCleared: Boolean(saved.rightWallCleared),
       cc: saved.cc == null ? 1 : Math.max(0, Number(saved.cc) || 0),
+      planePassword: normalizePassword(saved.planePassword),
       shopItem: null,
       shopRoom: normalizeShopRoom(saved),
       starStartGranted: true
@@ -229,6 +248,15 @@ function loadProgress() {
   } catch (error) {
     return fallback;
   }
+}
+
+function normalizePassword(value) {
+  const text = String(value ?? "0000").replace(/\D/g, "").slice(0, 4);
+  return text.padEnd(4, "0");
+}
+
+function planePassword() {
+  return normalizePassword(progress.planePassword);
 }
 
 function normalizeOwnedGuns(saved) {
@@ -457,7 +485,12 @@ function makeGame(chapter, subLevel) {
     score: progress.score,
     stars: clampStars(progress.stars),
     squad: [{ hp: MEMBER_HP, maxHp: MEMBER_HP }],
-    player: { x: view.width / 2, y: view.height - 52, radius: 12 },
+    player: { x: view.width / 2, y: view.height * 0.55, radius: 12 },
+    plane: { x: view.width / 2, y: view.height * 0.55, parked: false, vx: 0, vy: 0 },
+    control: "plane",
+    sword: { swing: 0, facing: "up" },
+    converts: 0,
+    allies: [],
     bullets: [],
     enemyBullets: [],
     enemies: [],
@@ -490,6 +523,30 @@ function makeGame(chapter, subLevel) {
     over: false,
     betweenLevels: false
   };
+}
+
+function flyBounds() {
+  return {
+    minX: 40,
+    maxX: view.width - 40,
+    minY: 36,
+    maxY: view.height - 24,
+    mid: view.width / 2
+  };
+}
+
+function bodyPos() {
+  if (!game) return { x: 0, y: 0 };
+  if (game.control === "plane") return { x: game.plane.x, y: game.plane.y };
+  return game.player;
+}
+
+function facingVector() {
+  const facing = game?.sword?.facing || "up";
+  if (facing === "left") return { x: -1, y: 0 };
+  if (facing === "right") return { x: 1, y: 0 };
+  if (facing === "down") return { x: 0, y: 1 };
+  return { x: 0, y: -1 };
 }
 
 function arena() {
@@ -683,11 +740,15 @@ function beginLevel() {
   game.paused = false;
   game.over = false;
   game.betweenLevels = false;
-  const bounds = arena();
-  game.player.x = view.width / 2;
-  game.player.y = view.height - 52;
+  const bounds = flyBounds();
+  game.control = "plane";
+  game.plane = { x: bounds.mid, y: view.height * 0.58, parked: false, vx: 0, vy: 0 };
+  game.player.x = game.plane.x;
+  game.player.y = game.plane.y;
   game.player.radius = 12;
-  game.player.x = clamp(game.player.x, bounds.innerLeft + 16, bounds.innerRight - 16);
+  game.sword = { swing: 0, facing: "up" };
+  game.converts = 0;
+  game.allies = [];
   spawnLevelBonusStars();
   pauseButton.textContent = "Ⅱ";
   clearPraise();
@@ -749,17 +810,12 @@ function loop(now) {
 
 function update(dt, now) {
   updatePlayer(dt);
-  updatePowers(dt);
-  updateDispensers(dt);
+  updateAllies(dt);
   spawnEnemies(dt);
-  if (!game.falling) shoot(now);
-  updateBullets(dt);
+  updateSword(dt, now);
   updateEnemies(dt);
-  updateEnemyBullets(dt);
   updatePickups(dt);
   updateParticles(dt);
-  game.leftDoor.spin += dt * 2.8;
-  game.rightDoor.spin += dt * 2.8;
 
   if (game.spawned >= game.enemyTotal && game.enemies.length === 0 && !hasStarPickups() && !game.over && !game.falling) {
     completeLevel();
@@ -785,49 +841,142 @@ function movePlayerToward(targetX, targetY, speed, dt) {
 }
 
 function updatePlayer(dt) {
-  const bounds = arena();
-  if (game.falling) {
-    game.fallVy += 980 * dt;
-    game.player.y += game.fallVy * dt;
-    game.player.x += (game.player.x < bounds.mid ? -40 : 40) * dt;
-    if (game.player.y > view.height + 40) fallToDeath();
+  const bounds = flyBounds();
+  const speed = playerMoveSpeed() * 1.35;
+  if (game.sword.swing > 0) {
+    game.sword.swing = Math.max(0, game.sword.swing - dt);
+  }
+
+  if (game.control === "parachute") {
+    if (keys.left) game.player.x -= speed * 0.8 * dt;
+    if (keys.right) game.player.x += speed * 0.8 * dt;
+    if (keys.up) game.player.y -= speed * 0.25 * dt;
+    if (keys.back) game.player.y += speed * 0.35 * dt;
+    game.player.y += 78 * dt;
+    game.player.x = clamp(game.player.x, bounds.minX, bounds.maxX);
+    game.player.y = clamp(game.player.y, bounds.minY, bounds.maxY);
+    if (game.player.y >= bounds.maxY - 2) {
+      game.control = "walk";
+      floatingNotice("降落了！按 2 可靠近飛機再上去", "#9fd8ff");
+    }
+    updateFacingFromKeys();
     return;
   }
 
-  if (game.sprintTimer > 0) {
-    game.sprintTimer = Math.max(0, game.sprintTimer - dt);
-  }
-
-  const sprintMult = game.sprintTimer > 0 ? 2.3 : 1;
-  const speed = playerMoveSpeed() * sprintMult;
-  const leftEdge = bounds.innerLeft + 16;
-  const rightEdge = bounds.innerRight - 16;
-  const minY = view.height * 0.68;
-  const maxY = view.height - 28;
-
-  if (usingPointer && pointerTargetX != null) {
-    movePlayerToward(pointerTargetX, pointerTargetY ?? game.player.y, speed, dt);
-    if (pointerPushSide === "left" && game.player.x <= leftEdge + 1.5) {
-      tryPushBrokenWall("left");
-    } else if (pointerPushSide === "right" && game.player.x >= rightEdge - 1.5) {
-      tryPushBrokenWall("right");
-    }
-  } else {
+  if (game.control === "walk") {
     if (keys.left) game.player.x -= speed * dt;
     if (keys.right) game.player.x += speed * dt;
-    if (keys.back) game.player.y += speed * 0.58 * dt;
-    if (!keys.back) {
-      const homeY = view.height - 52;
-      game.player.y += (homeY - game.player.y) * Math.min(1, dt * 3.2);
-    }
+    if (keys.up) game.player.y -= speed * dt;
+    if (keys.back) game.player.y += speed * dt;
+    game.player.x = clamp(game.player.x, bounds.minX, bounds.maxX);
+    game.player.y = clamp(game.player.y, bounds.minY, bounds.maxY);
+    updateFacingFromKeys();
+    return;
   }
 
-  // 按鍵／螢幕按鈕操作：只在通道內移動，不會撞牆、也不會掉下去
-  game.player.x = clamp(game.player.x, leftEdge, rightEdge);
-  game.player.y = clamp(game.player.y, minY, maxY);
-  if (game.player.x > leftEdge + 8 && game.player.x < rightEdge - 8) {
-    markWallsCleared();
+  if (!game.plane.parked) {
+    if (keys.left) game.plane.x -= speed * dt;
+    if (keys.right) game.plane.x += speed * dt;
+    if (keys.up) game.plane.y -= speed * dt;
+    if (keys.back) game.plane.y += speed * dt;
+    game.plane.x = clamp(game.plane.x, bounds.minX, bounds.maxX);
+    game.plane.y = clamp(game.plane.y, bounds.minY, bounds.maxY);
+    game.player.x = game.plane.x;
+    game.player.y = game.plane.y;
+    updateFacingFromKeys();
   }
+}
+
+function updateFacingFromKeys() {
+  if (keys.left) game.sword.facing = "left";
+  else if (keys.right) game.sword.facing = "right";
+  else if (keys.up) game.sword.facing = "up";
+  else if (keys.back) game.sword.facing = "down";
+}
+
+function parachuteOut() {
+  if (!game || game.over || game.paused || game.betweenLevels) return;
+  if (game.control !== "plane") {
+    floatingNotice("已經在外面了", "#ffd83d");
+    return;
+  }
+  game.control = "parachute";
+  game.player.x = game.plane.x;
+  game.player.y = game.plane.y + 18;
+  burst(game.player.x, game.player.y, "#dcecff", 16);
+  floatingNotice("從洞口跳傘！", "#9fd8ff");
+  updateHud();
+}
+
+function parkPlane() {
+  if (!game || game.over || game.paused || game.betweenLevels) return;
+  if (game.control === "walk" || game.control === "parachute") {
+    const dist = Math.hypot(game.player.x - game.plane.x, game.player.y - game.plane.y);
+    if (dist < 48) {
+      game.control = "plane";
+      game.plane.parked = false;
+      game.player.x = game.plane.x;
+      game.player.y = game.plane.y;
+      floatingNotice("密碼正確，回到飛機上", "#42e695");
+      updateHud();
+      return;
+    }
+    floatingNotice("靠近飛機繩子才能再上去", "#ffd83d");
+    return;
+  }
+  game.plane.parked = true;
+  game.control = "walk";
+  game.player.x = game.plane.x;
+  game.player.y = Math.min(flyBounds().maxY, game.plane.y + 36);
+  floatingNotice(`飛機停住了，車門密碼 ${planePassword()}`, "#ffd83d");
+  updateHud();
+}
+
+function swingSword() {
+  if (!game || game.over || game.paused || game.betweenLevels || game.falling) return;
+  if (game.sword.swing > 0.12) return;
+  game.sword.swing = SWORD_COOLDOWN;
+  const origin = bodyPos();
+  const dir = facingVector();
+  const hx = origin.x + dir.x * 28;
+  const hy = origin.y + dir.y * 28;
+  burst(hx, hy, "#ff8a3d", 10);
+  burst(hx, hy, "#ffffff", 8);
+  playSfx("shoot");
+  let hit = false;
+  for (let i = game.enemies.length - 1; i >= 0; i -= 1) {
+    const enemy = game.enemies[i];
+    if (Math.hypot(enemy.x - hx, enemy.y - hy) < SWORD_RANGE + enemy.radius) {
+      hitEnemy(i, enemy, { damage: SWORD_DAMAGE, color: "#ffffff" });
+      burst(enemy.x, enemy.y, "#ffffff", 12);
+      hit = true;
+    }
+  }
+  if (hit) floatingNotice("橘色寶劍！", "#ff8a3d");
+}
+
+function updateSword(dt) {
+  if (game.sword.swing > 0) game.sword.swing = Math.max(0, game.sword.swing - dt);
+}
+
+function updateAllies(dt) {
+  const origin = bodyPos();
+  const speed = playerMoveSpeed();
+  game.allies.forEach((ally, index) => {
+    const tx = origin.x + Math.cos(index * 0.9) * 28;
+    const ty = origin.y + 18 + (index % 3) * 12;
+    ally.x += (tx - ally.x) * Math.min(1, dt * 3.2);
+    ally.y += (ty - ally.y) * Math.min(1, dt * 3.2);
+    ally.swing = Math.max(0, (ally.swing || 0) - dt);
+    if (ally.swing <= 0) {
+      const target = game.enemies.find((enemy) => Math.hypot(enemy.x - ally.x, enemy.y - ally.y) < SWORD_RANGE + 20);
+      if (target) {
+        ally.swing = 0.7;
+        const idx = game.enemies.indexOf(target);
+        if (idx !== -1) hitEnemy(idx, target, { damage: SWORD_DAMAGE * 0.7, color: "#ffffff" });
+      }
+    }
+  });
 }
 
 function markWallsCleared() {
@@ -1248,55 +1397,13 @@ function buyShopItem(id) {
 
 function renderShop() {
   if (!shopBody) return;
-  if (!Array.isArray(progress.shopRoom)) progress.shopRoom = [];
   if (ui.shopCC) ui.shopCC.textContent = formatStars(currentStars());
-  if (ui.shopOwned) ui.shopOwned.textContent = roomItemSummary();
-  const shopSlots = Array.from({ length: 9 }, (_, index) => {
-    const item = SHOP_ITEMS[index];
-    if (!item) return mcSlotButton("", "", true);
-    const selected = selectedShopId === item.id ? " selected" : "";
-    return `
-      <button class="mc-slot filled${selected}" type="button" data-shop-item="${item.id}" title="${item.name}">
-        <span class="mc-slot-icon" style="background:${shopItemMeta(item.id).color}">${shopItemMeta(item.id).short}</span>
-      </button>`;
-  }).join("");
-  const roomSlots = Array.from({ length: SHOP_ROOM_SLOTS }, (_, index) => {
-    const owned = progress.shopRoom[index];
-    if (owned) {
-      const meta = shopItemMeta(owned);
-      return `<div class="mc-slot filled room-owned" title="已買：${shopItemName(owned)}">
-        <span class="mc-slot-icon" style="background:${meta.color}">${meta.short}</span>
-      </div>`;
-    }
-    const stock = SHOP_ITEMS[index % SHOP_ITEMS.length];
-    const meta = shopItemMeta(stock.id);
-    return `<div class="mc-slot filled room-stock" title="${stock.name}">
-      <span class="mc-slot-icon dim" style="background:${meta.color}">${meta.short}</span>
-    </div>`;
-  }).join("");
+  if (ui.shopOwned) ui.shopOwned.textContent = planePassword();
   shopBody.innerHTML = `
-    <div class="mc-chest">
-      <p class="mc-chest-label">選商品（藍／白／紅／雷／彈）→ 按彩虹購買</p>
-      <div class="mc-grid">${shopSlots}</div>
-      <button id="buyRainbowButton" class="rainbow-buy-button" type="button">
-        <span>購買</span>
-        <small>1 星星</small>
-      </button>
-      <div class="mc-service-cart" id="serviceCart">
-        <div class="mc-cart-item loaded" id="serviceCartItem">${shopItemMeta(progress.shopRoom.at(-1) || selectedShopId).short}</div>
-        <div class="mc-cart-bed"></div>
-        <div class="mc-cart-body"></div>
-        <div class="mc-cart-wheels"><span></span><span></span></div>
-        <p>服務車</p>
-      </div>
-      <p class="mc-chest-label">裡面的房間（格子都是滿的）</p>
-      <div class="mc-grid room-grid">${roomSlots}</div>
-    </div>`;
-  const cartItem = document.querySelector("#serviceCartItem");
-  if (cartItem) {
-    const last = progress.shopRoom.at(-1) || selectedShopId;
-    cartItem.style.background = shopItemMeta(last).color;
-  }
+    <label class="arsenal-hint" for="planePasswordInput">車門密碼（4碼）</label>
+    <input id="planePasswordInput" class="password-input" type="text" inputmode="numeric" maxlength="4" value="${planePassword()}" aria-label="飛機車門密碼">
+    <button id="savePasswordButton" class="rainbow-buy-button" type="button"><span>儲存密碼</span><small>上鎖用</small></button>
+    <p class="mc-chest-label">停機後別人要知道這組密碼才能上去。這場其他人都是電腦操控。</p>`;
 }
 
 function renderItemHotbar() {
@@ -1377,28 +1484,27 @@ function spawnEnemies(dt) {
   game.spawnTimer -= dt * 1000;
   if (game.spawnTimer > 0) return;
 
-  const bounds = arena();
   const allBig = game.chapter >= MAX_CHAPTER;
   const singleBoss = game.enemyTotal === 1;
   const big = allBig || singleBoss || game.spawned === 0 || game.spawned % 3 === 0;
-  const radius = big ? 26 : 11;
+  const radius = big ? 26 : 14;
   const scale = enemyHpScale();
-  const hp = (big ? 100 : 1) * scale;
-  const shield = big ? 100 : 0;
-  const margin = big ? radius + 2 : radius + 4;
+  const hp = (big ? 100 : 18) * scale;
   game.enemies.push({
-    x: random(bounds.innerLeft + margin, bounds.innerRight - margin),
-    y: -radius - random(0, 28),
+    x: random(40, view.width - 40),
+    y: -radius - random(0, 40),
     radius,
     big,
     hp,
     maxHp: hp,
-    shield,
-    shieldMax: shield,
-    speed: big ? 72 : 46,
-    shootTimer: big ? random(280, 480) : random(700, 1400),
+    shield: big ? 80 : 28,
+    shieldMax: big ? 80 : 28,
+    speed: big ? 70 : 52,
+    shootTimer: random(400, 900),
     phase: random(0, Math.PI * 2),
-    falling: false
+    falling: false,
+    inPlane: true,
+    color: FIGHTER_COLORS[game.spawned % FIGHTER_COLORS.length]
   });
   game.spawned += 1;
   game.spawnTimer = allBig
@@ -1407,33 +1513,7 @@ function spawnEnemies(dt) {
 }
 
 function shoot(now) {
-  const gun = currentGun();
-  const ammo = currentAmmo();
-  const boost = game.battleBoost > 0 ? PLAYER_BULLET_MULT : 1;
-  if (now - game.lastShot < gun.fire / (FIXED_SPEED_MULT * boost)) return;
-  game.lastShot = now;
-
-  const speed = 560 * PLAYER_BULLET_MULT;
-  let vx = 0;
-  let vy = -speed;
-  if (fireAim === "left") {
-    vx = -speed;
-    vy = 0;
-  } else if (fireAim === "right") {
-    vx = speed;
-    vy = 0;
-  }
-  game.bullets.push({
-    x: game.player.x,
-    y: game.player.y - 16,
-    radius: ammo.size * 0.95 * PLAYER_BULLET_MULT,
-    speed,
-    damage: bulletDamage(),
-    color: ammo.color,
-    vx,
-    vy
-  });
-  playSfx("shoot");
+  swingSword();
 }
 
 function setFireAim(aim) {
@@ -1535,13 +1615,12 @@ function hitEnemy(index, enemy, bullet) {
 }
 
 function updateEnemies(dt) {
-  const bounds = arena();
+  const origin = bodyPos();
   for (let i = game.enemies.length - 1; i >= 0; i -= 1) {
     const enemy = game.enemies[i];
     enemy.phase += dt * 2.6;
     if (enemy.falling) {
       enemy.y += Math.max(enemy.speed, 380) * dt;
-      enemy.x += (enemy.x < bounds.mid ? -50 : 50) * dt;
       if (enemy.y > view.height + 40) {
         game.enemies.splice(i, 1);
         game.score += enemy.big ? 10 : 5;
@@ -1549,36 +1628,19 @@ function updateEnemies(dt) {
       }
       continue;
     }
-    enemy.y += enemy.speed * dt;
-    if (enemy.big) {
-      const chase = clamp(game.player.x - enemy.x, -enemy.speed * 0.7 * dt, enemy.speed * 0.7 * dt);
-      enemy.x += chase;
-    } else {
-      enemy.x += Math.sin(enemy.phase) * 5 * dt;
-    }
-    enemy.x = clamp(enemy.x, bounds.innerLeft + enemy.radius, bounds.innerRight - enemy.radius);
+    const dx = origin.x - enemy.x;
+    const dy = origin.y - enemy.y;
+    const dist = Math.hypot(dx, dy) || 1;
+    enemy.x += (dx / dist) * enemy.speed * dt;
+    enemy.y += (dy / dist) * enemy.speed * dt;
+    enemy.x = clamp(enemy.x, 30, view.width - 30);
+    enemy.y = clamp(enemy.y, 24, view.height - 20);
 
-    const canShoot = enemy.y > 20 && enemy.y < view.height * 0.78;
-    if (canShoot) {
-      enemy.shootTimer -= dt * 1000;
-      if (enemy.shootTimer <= 0) {
-        const angle = Math.atan2(game.player.y - enemy.y, game.player.x - enemy.x);
-        const bulletSpeed = 210 * FIXED_SPEED_MULT;
-        game.enemyBullets.push({
-          x: enemy.x,
-          y: enemy.y + enemy.radius,
-          vx: Math.cos(angle) * bulletSpeed,
-          vy: Math.sin(angle) * bulletSpeed,
-          radius: enemy.big ? 4.5 : 3.5,
-          damage: 1
-        });
-        enemy.shootTimer = (enemy.big ? random(320, 520) : random(900, 1400)) / FIXED_SPEED_MULT;
-      }
-    }
-
-    if (distance(enemy, game.player) < enemy.radius + game.player.radius + 3 || enemy.y > view.height + 30) {
-      game.enemies.splice(i, 1);
-      damageSquad(1);
+    enemy.shootTimer -= dt * 1000;
+    if (enemy.shootTimer <= 0 && dist < SWORD_RANGE + 18) {
+      enemy.shootTimer = enemy.big ? 420 : 700;
+      damageSquad(enemy.big ? 2 : 1);
+      burst(origin.x, origin.y, "#ffffff", 8);
     }
   }
 }
@@ -1725,20 +1787,50 @@ function levelStarBonus(chapter, subLevel) {
   return 12 + chapter * 4 + Math.ceil(subLevel / 3);
 }
 
+function convertEnemyToAlly(enemy) {
+  game.converts += 1;
+  game.allies.push({
+    x: enemy.x,
+    y: enemy.y,
+    color: enemy.color?.color || "#ff536d",
+    name: enemy.color?.name || "紅",
+    hat: enemy.color?.color || "#07549a",
+    likePlayer: false,
+    swing: 0
+  });
+  game.squad.push({ hp: MEMBER_HP, maxHp: MEMBER_HP });
+  floatingNotice(`${enemy.color?.name || "敵人"}變成夥伴了！`, enemy.color?.color || "#58e6ff");
+  if (game.converts % CONVERT_NEED === 0) {
+    game.allies.push({
+      x: bodyPos().x,
+      y: bodyPos().y,
+      color: PLAYER_TINT,
+      name: "淺藍",
+      hat: "#1d6dff",
+      likePlayer: true,
+      swing: 0
+    });
+    game.squad.push({ hp: MEMBER_HP, maxHp: MEMBER_HP });
+    floatingNotice("戴藍帽子的自己人也來了！", PLAYER_TINT);
+  }
+}
+
 function defeatEnemy(index, enemy) {
   if (enemy.big) {
     grantStars(8, enemy.x, enemy.y);
     dropStarPickup(enemy.x, enemy.y, 5, true);
+    convertEnemyToAlly(enemy);
     enemy.falling = true;
     enemy.speed = 380;
     enemy.shield = 0;
-    burst(enemy.x, enemy.y, "#9fd8ff", 18);
-    floatingNotice("巨型敵人掉下去了！", "#7ec8ff");
+    burst(enemy.x, enemy.y, "#ffffff", 18);
+    floatingNotice("鑽石盔甲破了！", "#7ec8ff");
     return;
   }
   game.enemies.splice(index, 1);
   game.score += 5;
-  burst(enemy.x, enemy.y, "#ff536d", 10);
+  burst(enemy.x, enemy.y, "#ffffff", 12);
+  convertEnemyToAlly(enemy);
   dropStarPickup(enemy.x, enemy.y, 1);
   if (Math.random() < 0.45) {
     dropStarPickup(enemy.x + random(-16, 16), enemy.y - 8, 1);
@@ -1759,22 +1851,14 @@ function damageSquad(amount) {
   if (member.hp <= 0) {
     game.squad.pop();
     stripWeapons();
-    floatingNotice("一名隊員倒下，槍械回到練習手槍！", "#ff7187");
+    floatingNotice("一名隊員倒下！", "#ff7187");
   }
   updateHud();
   if (game.squad.length === 0) endGame();
 }
 
-function grantLevelReward(completedCount) {
-  if (completedCount % 2 === 0) {
-    if (progress.ammosOwned < ammos.length) {
-      progress.ammosOwned += 1;
-      progress.ammoIndex = progress.ammosOwned - 1;
-      return `獲得新子彈「${ammos[progress.ammoIndex].name}」！`;
-    }
-    return "所有子彈都已收集完成！";
-  }
-  return "槍可以到升級中心花 50 星選購。";
+function grantLevelReward() {
+  return "鑽石寶劍還在，星星已入帳。";
 }
 
 function totalClearedSubLevels() {
@@ -1908,10 +1992,14 @@ function endGame() {
   progress.stars = game.stars;
   progress.chapter = game.chapter;
   progress.subLevel = game.subLevel;
+  progress.leftWallBroken = false;
+  progress.rightWallBroken = false;
+  progress.leftWallCleared = false;
+  progress.rightWallCleared = false;
   saveProgress();
   showMessage(
-    "藍色小隊全滅",
-    `你停在第 ${game.chapter} 章第 ${game.subLevel} 小關，分數 ${game.score} 分。<br>裝備與進度都會保留，再來一次吧！`,
+    "淺藍小隊全滅",
+    `你停在第 ${game.chapter} 章第 ${game.subLevel} 小關，分數 ${game.score} 分。<br>旁邊玻璃會重新恢復，再來一次吧！`,
     "重新挑戰本關",
     () => {
       game = makeGame(game.chapter, game.subLevel);
@@ -1926,18 +2014,15 @@ function updateHud() {
     ui.squad.textContent = `${game.squad.length}／${Math.ceil(squadHpTotal())}`;
     ui.score.textContent = game.score;
     ui.stars.textContent = formatStars(game.stars);
-    ui.speed.textContent = game.battleBoost > 0
-      ? `${(FIXED_SPEED_MULT * PLAYER_BULLET_MULT).toFixed(1)}×`
-      : `${FIXED_SPEED_MULT.toFixed(1)}×`;
-    if (ui.cc) ui.cc.textContent = String(progress.cc || 0);
-    ui.shield.textContent = game.shield.active ? `${Math.ceil(game.shield.time)}秒` : "關";
-    ui.laser.textContent = game.laser.active ? `${Math.ceil(game.laser.time)}秒` : "關";
-    ui.bomb.textContent = game.bomb.active ? `${game.bomb.time.toFixed(1)}秒` : "關";
-    ui.leftDoor.textContent = game.leftDoor.open ? "已開啟" : `${game.leftDoor.hits}/${game.leftDoor.max}`;
-    ui.rightDoor.textContent = game.rightDoor.open ? "已開啟" : `${game.rightDoor.hits}/${game.rightDoor.max}`;
+    const modeText = game.control === "plane" ? (game.plane.parked ? "停機" : "駕駛中") : game.control === "parachute" ? "跳傘中" : "走路中";
+    if (ui.speed) ui.speed.textContent = modeText;
+    if (ui.cc) ui.cc.textContent = planePassword();
+    if (ui.shield) ui.shield.textContent = String(game.allies.length);
+    if (ui.laser) ui.laser.textContent = `${game.converts % CONVERT_NEED}/${CONVERT_NEED}`;
+    if (ui.bomb) ui.bomb.textContent = "鑽石";
   }
-  ui.gunName.textContent = currentGun().name;
-  ui.ammoName.textContent = currentAmmo().name;
+  if (ui.gunName) ui.gunName.textContent = "鑽石寶劍";
+  if (ui.ammoName) ui.ammoName.textContent = "橘色＋白光";
   updateHomeInfo();
 }
 
@@ -1946,7 +2031,7 @@ function updateHomeInfo() {
   ui.homeScore.textContent = progress.score;
   ui.homeStars.textContent = formatStars(progress.stars);
   if (upgradeStars) upgradeStars.textContent = formatStars(currentStars());
-  if (ui.homeCC) ui.homeCC.textContent = String(progress.cc || 0);
+  if (ui.homeCC) ui.homeCC.textContent = planePassword();
 }
 
 function renderChapterList() {
@@ -2045,62 +2130,32 @@ function renderSubLevelList() {
 function draw() {
   if (!game) return;
   drawArena();
-  drawDispensers();
+  drawParkedPlane();
   drawPickups();
-  drawBullets();
-  drawLaser();
   drawEnemies();
-  drawShield();
+  drawAllies();
   drawSquad();
-  drawBombFuse();
+  drawSwordSlash();
   drawParticles();
 }
 
 function drawArena() {
-  const bounds = arena();
   const gradient = ctx.createLinearGradient(0, 0, 0, view.height);
-  gradient.addColorStop(0, "#5b1728");
-  gradient.addColorStop(0.22, "#203b4a");
-  gradient.addColorStop(1, "#07547a");
+  gradient.addColorStop(0, "#7ec8ff");
+  gradient.addColorStop(0.45, "#3a7ec4");
+  gradient.addColorStop(1, "#0b3a63");
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, view.width, view.height);
-
-  // 側牆區塊
-  ctx.fillStyle = "#04101fbb";
-  ctx.fillRect(0, 0, bounds.innerLeft, view.height);
-  ctx.fillRect(bounds.innerRight, 0, view.width - bounds.innerRight, view.height);
-
-  // 中間窄樓梯
-  const stepH = 22;
-  for (let y = 0, i = 0; y < view.height; y += stepH, i += 1) {
-    ctx.fillStyle = i % 2 === 0 ? "#1d4f6ecc" : "#163d56cc";
-    ctx.fillRect(bounds.innerLeft, y, bounds.corridor, stepH);
-    ctx.strokeStyle = "#ffffff22";
+  ctx.fillStyle = "#ffffff55";
+  for (let i = 0; i < 6; i += 1) {
+    const x = (i * 170 + (lastFrame / 40) % 170) % (view.width + 80) - 40;
+    const y = 40 + (i % 3) * 50;
     ctx.beginPath();
-    ctx.moveTo(bounds.innerLeft, y + stepH);
-    ctx.lineTo(bounds.innerRight, y + stepH);
-    ctx.stroke();
+    ctx.ellipse(x, y, 46, 16, 0, 0, Math.PI * 2);
+    ctx.fill();
   }
-
-  drawWall(bounds.left, bounds.thickness, 1, "left");
-  drawWall(bounds.right, bounds.thickness, -1, "right");
-  drawDoor("left", bounds);
-  drawDoor("right", bounds);
-
-  // 上方狀態條
-  ctx.fillStyle = "#07162de6";
-  ctx.fillRect(bounds.innerLeft, 8, bounds.corridor, 36);
-  ctx.fillStyle = "#d7e8ff";
-  ctx.font = "800 11px Microsoft JhengHei";
-  ctx.textAlign = "center";
-  const leftText = game.leftDoor.open ? "左門已開·加人橫出" : `左門 ${game.leftDoor.hits}/100`;
-  const rightText = game.rightDoor.open ? "右門已開·補血橫出" : `右門 ${game.rightDoor.hits}/100`;
-  ctx.fillText(leftText, bounds.mid - bounds.corridor * 0.28, 24);
-  ctx.fillText("作戰通道", bounds.mid, 24);
-  ctx.fillText(rightText, bounds.mid + bounds.corridor * 0.28, 24);
-  ctx.fillStyle = "#9eb6d0";
-  ctx.font = "700 10px Microsoft JhengHei";
-  ctx.fillText("開門後橫向衝出加人／補血／加強戰", bounds.mid, 38);
+  ctx.fillStyle = "#0e2a18";
+  ctx.fillRect(0, view.height - 18, view.width, 18);
 }
 
 function drawDoor(side, bounds) {
@@ -2225,8 +2280,98 @@ function drawWall(x, thickness, inward, side) {
   }
 }
 
-function drawDispensers() {
-  return;
+function drawParkedPlane() {
+  if (!game.plane || game.control === "plane") return;
+  drawPlaneAt(game.plane.x, game.plane.y, PLAYER_TINT, true);
+  if (game.plane.parked || game.control !== "plane") {
+    ctx.strokeStyle = "#c9a227";
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(game.plane.x, game.plane.y + 10);
+    ctx.lineTo(game.plane.x, Math.min(view.height - 18, game.player.y + 8));
+    ctx.stroke();
+    ctx.fillStyle = "#ffd83d";
+    ctx.font = "800 11px Microsoft JhengHei";
+    ctx.textAlign = "center";
+    ctx.fillText(`密碼 ${planePassword()}`, game.plane.x, game.plane.y - 28);
+  }
+}
+
+function drawPlaneAt(x, y, color, empty) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.fillStyle = "#d7e6f4";
+  ctx.beginPath();
+  ctx.ellipse(0, 0, 34, 12, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = color;
+  ctx.beginPath();
+  ctx.ellipse(0, -2, 18, 8, 0, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#8aa4bb";
+  ctx.fillRect(-28, -3, 10, 6);
+  ctx.fillRect(18, -3, 12, 6);
+  ctx.fillStyle = "#1b2a38";
+  ctx.beginPath();
+  ctx.arc(0, 2, 6, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = "#9fd8ff88";
+  ctx.beginPath();
+  ctx.arc(0, 2, 4, 0, Math.PI * 2);
+  ctx.fill();
+  if (empty) {
+    ctx.fillStyle = "#ffffffaa";
+    ctx.font = "800 9px Microsoft JhengHei";
+    ctx.textAlign = "center";
+    ctx.fillText("洞", 0, 5);
+  }
+  ctx.restore();
+}
+
+function drawSwordSlash() {
+  if (!game.sword || game.sword.swing <= 0) return;
+  const origin = bodyPos();
+  const dir = facingVector();
+  const t = game.sword.swing / SWORD_COOLDOWN;
+  ctx.save();
+  ctx.translate(origin.x + dir.x * 22, origin.y + dir.y * 22);
+  ctx.rotate(Math.atan2(dir.y, dir.x) + (0.8 - t));
+  ctx.fillStyle = "#ff8a3d";
+  ctx.fillRect(0, -4, 34, 8);
+  ctx.fillStyle = "#4ad2ff";
+  ctx.fillRect(26, -5, 10, 10);
+  ctx.fillStyle = "#ffffff";
+  ctx.globalAlpha = 0.85;
+  ctx.beginPath();
+  ctx.arc(38, 0, 7, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.restore();
+}
+
+function drawAllies() {
+  game.allies.forEach((ally) => {
+    drawFighter(ally.x, ally.y, ally.color, ally.hat, ally.likePlayer);
+  });
+}
+
+function drawFighter(x, y, body, hat, blueHat) {
+  const u = SQUAD_SCALE;
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.fillStyle = "#3ad0ff";
+  ctx.fillRect(-8 * u, 16 * u, 6 * u, 6 * u);
+  ctx.fillRect(2 * u, 16 * u, 6 * u, 6 * u);
+  ctx.fillStyle = body;
+  roundRect(-10 * u, -8 * u, 20 * u, 18 * u, 4 * u);
+  ctx.fill();
+  ctx.fillStyle = "#f1c4a4";
+  ctx.beginPath();
+  ctx.arc(0, -14 * u, 7 * u, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.fillStyle = blueHat ? "#1d6dff" : hat;
+  roundRect(-8 * u, -22 * u, 16 * u, 7 * u, 2 * u);
+  ctx.fill();
+  ctx.restore();
 }
 
 function dispenserInfo(type) {
@@ -2243,10 +2388,14 @@ function dispenserInfo(type) {
 
 function drawEnemies() {
   game.enemies.forEach((enemy) => {
+    const tint = enemy.color?.color || "#ff506a";
+    if (enemy.inPlane && !enemy.falling) {
+      drawPlaneAt(enemy.x, enemy.y + 16, tint, false);
+    }
     const u = enemy.radius / 16;
-    const bodyColor = enemy.big ? "#c62644" : "#ff506a";
-    const darkColor = enemy.big ? "#7c1730" : "#a3283f";
-    const hatColor = enemy.big ? "#320a17" : "#3d0f1d";
+    const bodyColor = tint;
+    const darkColor = "#1b3d55";
+    const hatColor = enemy.color?.id === "black" ? "#111" : tint;
     const step = Math.sin(enemy.phase * 1.6) * 3 * u;
     ctx.save();
     ctx.translate(enemy.x, enemy.y);
@@ -2332,47 +2481,15 @@ function drawEnemies() {
 }
 
 function drawSquad() {
-  const count = game.squad.length;
-  const visible = Math.min(count, 10);
+  if (game.control === "plane") {
+    drawPlaneAt(game.plane.x, game.plane.y, PLAYER_TINT, false);
+  }
+  const count = Math.max(1, Math.min(game.squad.length, 10));
   const u = SQUAD_SCALE;
-  for (let i = visible - 1; i >= 0; i -= 1) {
-    const row = Math.floor(i / 5);
-    const column = i % 5;
-    const rowCount = Math.min(5, visible - row * 5);
-    const offsetX = (column - (rowCount - 1) / 2) * 16;
-    const offsetY = row * 14;
-    const x = game.player.x + offsetX;
-    const y = game.player.y + offsetY;
-
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.fillStyle = "#073e73";
-    ctx.fillRect(-7 * u, 6 * u, 5 * u, 15 * u);
-    ctx.fillRect(2 * u, 6 * u, 5 * u, 15 * u);
-    ctx.fillStyle = "#071e36";
-    ctx.fillRect(-8 * u, 19 * u, 7 * u, 4 * u);
-    ctx.fillRect(1 * u, 19 * u, 7 * u, 4 * u);
-    ctx.fillStyle = "#159ef2";
-    roundRect(-10 * u, -9 * u, 20 * u, 19 * u, 5 * u);
-    ctx.fill();
-    ctx.fillRect(-15 * u, -6 * u, 5 * u, 15 * u);
-    ctx.fillRect(10 * u, -6 * u, 5 * u, 13 * u);
-    ctx.fillStyle = "#10283d";
-    ctx.fillRect(9 * u, 3 * u, 18 * u, 4 * u);
-    ctx.fillStyle = "#f1c4a4";
-    ctx.beginPath();
-    ctx.arc(0, -15 * u, 7 * u, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#07549a";
-    roundRect(-8 * u, -22 * u, 16 * u, 6 * u, 2 * u);
-    ctx.fill();
-    ctx.fillRect(-9 * u, -17 * u, 18 * u, 2 * u);
-    ctx.fillStyle = "#17212d";
-    ctx.beginPath();
-    ctx.arc(-2.5 * u, -14 * u, 1.1 * u, 0, Math.PI * 2);
-    ctx.arc(2.5 * u, -14 * u, 1.1 * u, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.restore();
+  const origin = bodyPos();
+  for (let i = count - 1; i >= 0; i -= 1) {
+    const offsetX = game.control === "plane" ? 0 : (i - (count - 1) / 2) * 14;
+    drawFighter(origin.x + offsetX, origin.y, PLAYER_TINT, "#1d6dff", true);
   }
 
   const active = game.squad[game.squad.length - 1];
@@ -2384,12 +2501,12 @@ function drawSquad() {
     ctx.textAlign = "center";
     ctx.strokeStyle = "#082033";
     ctx.lineWidth = 3;
-    ctx.strokeText(`${total}`, game.player.x, game.player.y - 36);
-    ctx.fillText(`${total}`, game.player.x, game.player.y - 36);
+    ctx.strokeText(`${total}`, origin.x, origin.y - 36);
+    ctx.fillText(`${total}`, origin.x, origin.y - 36);
     ctx.fillStyle = "#072238";
-    ctx.fillRect(game.player.x - width / 2, game.player.y + 22, width, 5);
+    ctx.fillRect(origin.x - width / 2, origin.y + 22, width, 5);
     ctx.fillStyle = "#46e991";
-    ctx.fillRect(game.player.x - width / 2, game.player.y + 22, width * Math.max(0, active.hp / active.maxHp), 5);
+    ctx.fillRect(origin.x - width / 2, origin.y + 22, width * Math.max(0, active.hp / active.maxHp), 5);
   }
 }
 
@@ -2656,6 +2773,7 @@ function resetProgress() {
     leftWallCleared: false,
     rightWallCleared: false,
     cc: 1,
+    planePassword: "0000",
     shopItem: null,
     shopRoom: [],
     starStartGranted: true
@@ -2680,39 +2798,11 @@ function setDirection(direction, pressed) {
 }
 
 function renderArsenal() {
-  if (!Array.isArray(progress.ownedGuns)) progress.ownedGuns = normalizeOwnedGuns(progress);
   if (upgradeStars) upgradeStars.textContent = formatStars(currentStars());
-  const gunRows = guns.map((gun, index) => {
-    const owned = ownsGun(index);
-    const equipped = owned && progress.gunIndex === index;
-    const testing = previewGunIndex === index;
-    const costText = index === 0 ? "免費" : `${GUN_COST} 星`;
-    const action = owned
-      ? `<button class="upgrade-mini" type="button" data-gun-act="equip" data-index="${index}">${equipped ? "使用中" : "裝備"}</button>`
-      : `<button class="upgrade-mini buy" type="button" data-gun-act="buy" data-index="${index}">買下來</button>`;
-    return `
-      <div class="arsenal-item gun-card${owned ? "" : " locked"}${equipped ? " equipped" : ""}${testing ? " testing" : ""}">
-        <span class="arsenal-name">${gun.name}</span>
-        <span class="arsenal-dots">${"●".repeat(gun.power)}${"○".repeat(guns.length - gun.power)}</span>
-        <span class="arsenal-detail">傷害 ${gun.damage}　射速 ${gun.fire}ms　${costText}</span>
-        <div class="upgrade-actions">
-          ${action}
-          <button class="upgrade-mini test" type="button" data-gun-act="test" data-index="${index}">測炮</button>
-        </div>
-      </div>`;
-  }).join("");
-
-  const ammoRows = ammos.map((ammo, index) => {
-    const owned = index < progress.ammosOwned;
-    const equipped = index === Math.min(progress.ammoIndex, progress.ammosOwned - 1);
-    return arsenalRow("ammo", index, ammo.name, ammo.power, ammos.length, owned, equipped, `威力 ${ammo.multiplier.toFixed(2)} 倍`);
-  }).join("");
-
+  if (!arsenalBody) return;
   arsenalBody.innerHTML = `
-    <h3>槍械（各 50 星，練習手槍免費）</h3>
-    <div class="arsenal-list">${gunRows}</div>
-    <h3>子彈（過關解鎖後可裝備）</h3>
-    <div class="arsenal-list">${ammoRows}</div>`;
+    <p class="arsenal-hint">現在不用槍了。進關用鑽石寶劍，星星當錢留下。</p>
+    <p class="arsenal-hint">目前星星：${formatStars(currentStars())}　飛機密碼：${planePassword()}</p>`;
 }
 
 function arsenalRow(kind, index, name, power, max, owned, equipped, detail) {
@@ -3138,9 +3228,9 @@ document.querySelectorAll("[data-open-upgrade]").forEach((button) => {
   button.addEventListener("click", openUpgradeCenter);
 });
 
-document.querySelectorAll(".aim-button").forEach((button) => {
-  button.addEventListener("click", () => setFireAim(button.dataset.aim));
-});
+document.querySelector("#parachuteButton")?.addEventListener("click", parachuteOut);
+document.querySelector("#parkButton")?.addEventListener("click", parkPlane);
+document.querySelector("#swingButton")?.addEventListener("click", swingSword);
 
 document.querySelectorAll("[data-close]").forEach((button) => {
   button.addEventListener("click", () => {
@@ -3175,13 +3265,13 @@ arsenalBody.addEventListener("click", (event) => {
 });
 
 shopBody.addEventListener("click", (event) => {
-  if (event.target.closest("#buyRainbowButton")) {
-    buyShopItem(selectedShopId);
-    return;
-  }
-  const item = event.target.closest("[data-shop-item]");
-  if (!item || item.disabled) return;
-  selectShopItem(item.dataset.shopItem);
+  if (!event.target.closest("#savePasswordButton")) return;
+  const input = document.querySelector("#planePasswordInput");
+  progress.planePassword = normalizePassword(input?.value);
+  saveProgress();
+  updateHud();
+  renderShop();
+  floatingNotice(`密碼已設成 ${planePassword()}`, "#ffd83d");
 });
 
 itemHotbar?.addEventListener("click", (event) => {
@@ -3209,23 +3299,8 @@ document.querySelectorAll(".move-button").forEach((button) => {
 const keyMap = {
   ArrowLeft: "left", a: "left", A: "left",
   ArrowRight: "right", d: "right", D: "right",
-  ArrowDown: "back", s: "back", S: "back"
-};
-
-const starKeyActions = {
-  Digit5: useStarSprint,
-  Numpad5: useStarSprint,
-  Digit6: useStarShield,
-  Numpad6: useStarShield,
-  Digit7: useStarLaser,
-  Numpad7: useStarLaser,
-  Digit8: useStarBomb,
-  Numpad8: useStarBomb,
-  Digit9: useStarMember,
-  Numpad9: useStarMember,
-  Digit0: useStarHeal,
-  Numpad0: useStarHeal,
-  KeyQ: useStarBulletBoost
+  ArrowDown: "back", s: "back", S: "back",
+  ArrowUp: "up", w: "up", W: "up"
 };
 
 function isDialogOpen() {
@@ -3241,33 +3316,17 @@ window.addEventListener("keydown", (event) => {
 
   if (event.code === "Space") {
     event.preventDefault();
-    if (!event.repeat) useStarSprint();
+    if (!event.repeat) swingSword();
     return;
   }
-
-  const starAction = starKeyActions[event.code];
-  if (starAction) {
-    if (!event.repeat) starAction();
-    return;
-  }
-
   if (event.code === "Digit1" || event.code === "Numpad1") {
-    setFireAim("front");
+    if (!event.repeat) parachuteOut();
     return;
   }
   if (event.code === "Digit2" || event.code === "Numpad2") {
-    setDirection("back", true);
+    if (!event.repeat) parkPlane();
     return;
   }
-  if (event.code === "Digit3" || event.code === "Numpad3") {
-    setFireAim("left");
-    return;
-  }
-  if (event.code === "Digit4" || event.code === "Numpad4") {
-    setFireAim("right");
-    return;
-  }
-
   if (keyMap[event.key]) {
     event.preventDefault();
     setDirection(keyMap[event.key], true);
@@ -3275,10 +3334,6 @@ window.addEventListener("keydown", (event) => {
 });
 
 window.addEventListener("keyup", (event) => {
-  if (event.code === "Digit2" || event.code === "Numpad2") {
-    setDirection("back", false);
-    return;
-  }
   if (keyMap[event.key]) setDirection(keyMap[event.key], false);
 });
 
@@ -3319,6 +3374,7 @@ function clearPointerAim() {
 canvas.addEventListener("pointerdown", (event) => {
   dragging = true;
   canvas.setPointerCapture(event.pointerId);
+  swingSword();
   aimWithPointer(event);
 });
 canvas.addEventListener("pointermove", (event) => {
@@ -3363,6 +3419,6 @@ renderChapterList();
 renderArsenal();
 renderShop();
 renderItemHotbar();
-ui.gunName.textContent = currentGun().name;
-ui.ammoName.textContent = currentAmmo().name;
+ui.gunName.textContent = "鑽石寶劍";
+ui.ammoName.textContent = "橘色＋白光";
 saveProgress();
