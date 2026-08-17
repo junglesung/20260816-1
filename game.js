@@ -1,6 +1,7 @@
 const canvas = document.querySelector("#gameCanvas");
 const ctx = canvas.getContext("2d");
 const startScreen = document.querySelector("#startScreen");
+const packSelectScreen = document.querySelector("#packSelectScreen");
 const stageSelectScreen = document.querySelector("#stageSelectScreen");
 const gameScreen = document.querySelector("#gameScreen");
 const pauseButton = document.querySelector("#pauseButton");
@@ -11,7 +12,10 @@ const arsenalDialog = document.querySelector("#arsenalDialog");
 const arsenalBody = document.querySelector("#arsenalBody");
 const musicButton = document.querySelector("#musicButton");
 const chapterList = document.querySelector("#chapterList");
+const packList = document.querySelector("#packList");
 const subLevelList = document.querySelector("#subLevelList");
+const packSelectTitle = document.querySelector("#packSelectTitle");
+const packSelectHint = document.querySelector("#packSelectHint");
 const stageSelectTitle = document.querySelector("#stageSelectTitle");
 const stageSelectHint = document.querySelector("#stageSelectHint");
 
@@ -21,6 +25,8 @@ const ui = {
   score: document.querySelector("#scoreValue"),
   stars: document.querySelector("#starValue"),
   speed: document.querySelector("#speedValue"),
+  leftDoor: document.querySelector("#leftDoorValue"),
+  rightDoor: document.querySelector("#rightDoorValue"),
   gunName: document.querySelector("#gunName"),
   ammoName: document.querySelector("#ammoName"),
   homeLevel: document.querySelector("#homeLevel"),
@@ -30,6 +36,16 @@ const ui = {
 
 const MAX_CHAPTER = 10;
 const MEMBER_HP = 1111;
+const DOOR_HITS_NEEDED = 500;
+const PACK_SIZE = 10;
+const SQUAD_SCALE = 0.68;
+const CLEAR_QUOTES = [
+  "漂亮！這一波清得乾乾淨淨。",
+  "藍色小隊再下一城！",
+  "窄道突圍成功，繼續往前衝！",
+  "三管齊射，紅色軍團擋不住！",
+  "門縫裡的補給也別忘了拿哦。"
+];
 
 const guns = [
   { name: "練習手槍", power: 1, damage: 25, fire: 300 },
@@ -53,6 +69,7 @@ const keys = { left: false, right: false, back: false };
 
 let progress = loadProgress();
 let selectedChapter = 1;
+let selectedPack = 1;
 let view = { width: 900, height: 620, dpr: 1 };
 let lastFrame = 0;
 let animationId = 0;
@@ -60,6 +77,25 @@ let game = null;
 
 function chapterGoal(chapter) {
   return chapter * 100;
+}
+
+function packCount(chapter) {
+  return Math.ceil(chapterGoal(chapter) / PACK_SIZE);
+}
+
+function packRange(pack) {
+  const start = (pack - 1) * PACK_SIZE + 1;
+  const end = pack * PACK_SIZE;
+  return { start, end };
+}
+
+function packOfSubLevel(subLevel) {
+  return Math.ceil(subLevel / PACK_SIZE);
+}
+
+function isPackUnlocked(chapter, pack) {
+  if (pack <= 1) return isChapterUnlocked(chapter);
+  return getChapterCleared(chapter) >= (pack - 1) * PACK_SIZE;
 }
 
 function defaultChapterCleared() {
@@ -148,13 +184,15 @@ function highestUnlockedChapter() {
 }
 
 function visibleSubLevelCount(chapter) {
-  const cleared = getChapterCleared(chapter);
-  const goal = chapterGoal(chapter);
-  return Math.min(goal, cleared + 1);
+  return chapterGoal(chapter);
 }
 
 function difficultyScale(chapter, subLevel) {
   return (chapter - 1) * 100 + subLevel;
+}
+
+function randomClearQuote() {
+  return CLEAR_QUOTES[Math.floor(Math.random() * CLEAR_QUOTES.length)];
 }
 
 function currentGun() {
@@ -176,7 +214,7 @@ function makeGame(chapter, subLevel) {
     score: progress.score,
     stars: progress.stars,
     squad: [{ hp: MEMBER_HP, maxHp: MEMBER_HP }],
-    player: { x: view.width / 2, y: view.height - 60, radius: 18 },
+    player: { x: view.width / 2, y: view.height - 52, radius: 12 },
     bullets: [],
     enemyBullets: [],
     enemies: [],
@@ -187,6 +225,8 @@ function makeGame(chapter, subLevel) {
       { type: "heal", zone: "right", timer: 6, interval: 10 },
       { type: "firerate", zone: "middle", timer: 2.5, interval: 7.5 }
     ],
+    leftDoor: { hits: 0, max: DOOR_HITS_NEEDED, open: false },
+    rightDoor: { hits: 0, max: DOOR_HITS_NEEDED, open: false },
     speedLevel: 0,
     lastShot: 0,
     spawnTimer: 0,
@@ -200,17 +240,51 @@ function makeGame(chapter, subLevel) {
 }
 
 function arena() {
-  const thickness = clamp(view.width * 0.035, 14, 30);
-  const left = view.width * 0.17;
-  const right = view.width * 0.83;
-  return { left, right, thickness, innerLeft: left + thickness / 2, innerRight: right - thickness / 2 };
+  const corridor = clamp(view.width * 0.2, 70, 104);
+  const mid = view.width / 2;
+  const innerLeft = mid - corridor / 2;
+  const innerRight = mid + corridor / 2;
+  const thickness = clamp((view.width - corridor) * 0.42, 48, 120);
+  const left = innerLeft - thickness / 2;
+  const right = innerRight + thickness / 2;
+  return { left, right, thickness, innerLeft, innerRight, corridor, mid };
+}
+
+function doorBox(side, bounds = arena()) {
+  const width = clamp(bounds.thickness * 0.72, 28, 54);
+  const height = clamp(view.height * 0.28, 110, 180);
+  const y = view.height * 0.16;
+  if (side === "left") {
+    return { x: bounds.innerLeft - width, y, w: width + 6, h: height };
+  }
+  return { x: bounds.innerRight - 6, y, w: width + 6, h: height };
+}
+
+function pointInBox(point, box) {
+  return point.x >= box.x && point.x <= box.x + box.w && point.y >= box.y && point.y <= box.y + box.h;
+}
+
+function hideMenuScreens() {
+  startScreen.hidden = true;
+  packSelectScreen.hidden = true;
+  stageSelectScreen.hidden = true;
+  gameScreen.hidden = true;
 }
 
 function openStageSelect(chapter) {
   if (!isChapterUnlocked(chapter)) return;
   selectedChapter = chapter;
-  startScreen.hidden = true;
-  gameScreen.hidden = true;
+  const cleared = getChapterCleared(chapter);
+  selectedPack = clamp(packOfSubLevel(Math.max(1, cleared + 1)), 1, packCount(chapter));
+  hideMenuScreens();
+  packSelectScreen.hidden = false;
+  renderPackList();
+}
+
+function openPackLevels(pack) {
+  if (!isPackUnlocked(selectedChapter, pack)) return;
+  selectedPack = pack;
+  hideMenuScreens();
   stageSelectScreen.hidden = false;
   renderSubLevelList();
 }
@@ -232,11 +306,35 @@ function returnToHome() {
   hideMessage();
   stopMusic();
   game = null;
-  gameScreen.hidden = true;
-  stageSelectScreen.hidden = true;
+  hideMenuScreens();
   startScreen.hidden = false;
   updateHomeInfo();
   renderChapterList();
+}
+
+function returnToPackSelect() {
+  cancelAnimationFrame(animationId);
+  animationId = 0;
+  Object.keys(keys).forEach((key) => setDirection(key, false));
+  if (game) {
+    game.running = false;
+    game.paused = false;
+    progress.score = game.score;
+    progress.stars = game.stars;
+    progress.chapter = game.chapter;
+    progress.subLevel = game.subLevel;
+    selectedChapter = game.chapter;
+    selectedPack = packOfSubLevel(game.subLevel);
+    saveProgress();
+  }
+  clearPraise();
+  hideMessage();
+  stopMusic();
+  game = null;
+  hideMenuScreens();
+  packSelectScreen.hidden = false;
+  renderPackList();
+  updateHomeInfo();
 }
 
 function returnToStageSelect() {
@@ -251,14 +349,14 @@ function returnToStageSelect() {
     progress.chapter = game.chapter;
     progress.subLevel = game.subLevel;
     selectedChapter = game.chapter;
+    selectedPack = packOfSubLevel(game.subLevel);
     saveProgress();
   }
   clearPraise();
   hideMessage();
   stopMusic();
   game = null;
-  gameScreen.hidden = true;
-  startScreen.hidden = true;
+  hideMenuScreens();
   stageSelectScreen.hidden = false;
   renderSubLevelList();
   updateHomeInfo();
@@ -266,16 +364,18 @@ function returnToStageSelect() {
 
 function startGame(chapter, subLevel) {
   if (!isChapterUnlocked(chapter)) return;
-  const maxSub = visibleSubLevelCount(chapter);
-  if (subLevel < 1 || subLevel > maxSub) return;
+  const goal = chapterGoal(chapter);
+  if (subLevel < 1 || subLevel > goal) return;
+  const pack = packOfSubLevel(subLevel);
+  if (!isPackUnlocked(chapter, pack)) return;
 
   selectedChapter = chapter;
+  selectedPack = pack;
   progress.chapter = chapter;
   progress.subLevel = subLevel;
   saveProgress();
 
-  startScreen.hidden = true;
-  stageSelectScreen.hidden = true;
+  hideMenuScreens();
   gameScreen.hidden = false;
   resizeCanvas();
   game = makeGame(chapter, subLevel);
@@ -288,17 +388,19 @@ function startGame(chapter, subLevel) {
 
 function beginLevel() {
   const allBig = game.chapter >= MAX_CHAPTER;
-  // 第 N 小關派出 N 隻敵人；第 1 章第 1 小關＝只打掉 1 隻大怪
+  // 第 N 小關派出更多、更密的敵人；第 1 小關仍是 1 隻大怪
   game.enemyTotal = allBig
-    ? Math.min(Math.max(1, Math.ceil(game.subLevel / 40)), 20)
-    : Math.min(Math.max(1, game.subLevel), 80);
+    ? Math.min(Math.max(1, Math.ceil(game.subLevel / 30)), 28)
+    : Math.min(Math.max(1, Math.ceil(game.subLevel * 1.6)), 120);
   game.spawned = 0;
-  game.spawnTimer = 200;
+  game.spawnTimer = 160;
   game.enemies.length = 0;
   game.bullets.length = 0;
   game.enemyBullets.length = 0;
   game.pickups.length = 0;
   game.particles.length = 0;
+  game.leftDoor = { hits: 0, max: DOOR_HITS_NEEDED, open: false };
+  game.rightDoor = { hits: 0, max: DOOR_HITS_NEEDED, open: false };
   game.dispensers.forEach((dispenser, index) => {
     dispenser.timer = 2.5 + index * 1.5;
   });
@@ -308,8 +410,9 @@ function beginLevel() {
   game.betweenLevels = false;
   const bounds = arena();
   game.player.x = view.width / 2;
-  game.player.y = view.height - 60;
-  game.player.x = clamp(game.player.x, bounds.innerLeft + 24, bounds.innerRight - 24);
+  game.player.y = view.height - 52;
+  game.player.radius = 12;
+  game.player.x = clamp(game.player.x, bounds.innerLeft + 16, bounds.innerRight - 16);
   pauseButton.textContent = "Ⅱ";
   clearPraise();
   hideMessage();
@@ -378,11 +481,11 @@ function updatePlayer(dt) {
   if (keys.right) game.player.x += speed * dt;
   if (keys.back) game.player.y += speed * 0.58 * dt;
   if (!keys.back) {
-    const homeY = view.height - 60;
+    const homeY = view.height - 52;
     game.player.y += (homeY - game.player.y) * Math.min(1, dt * 5);
   }
-  game.player.x = clamp(game.player.x, bounds.innerLeft + 24, bounds.innerRight - 24);
-  game.player.y = clamp(game.player.y, view.height * 0.68, view.height - 35);
+  game.player.x = clamp(game.player.x, bounds.innerLeft + 16, bounds.innerRight - 16);
+  game.player.y = clamp(game.player.y, view.height * 0.68, view.height - 28);
 }
 
 function updateDispensers(dt) {
@@ -433,28 +536,29 @@ function spawnEnemies(dt) {
   const bounds = arena();
   const allBig = game.chapter >= MAX_CHAPTER;
   const singleBoss = game.enemyTotal === 1;
-  const big = allBig || singleBoss || game.spawned === 0 || game.spawned % 4 === 0;
-  const radius = big ? 34 : 16;
+  const big = allBig || singleBoss || game.spawned === 0 || game.spawned % 3 === 0;
+  const radius = big ? 26 : 11;
   const scale = enemyHpScale();
   const hp = (big ? 100 : 1) * scale;
   const shield = (big ? 500 : 0) * scale;
+  const margin = big ? radius + 2 : radius + 4;
   game.enemies.push({
-    x: random(bounds.innerLeft + 40, bounds.innerRight - 40),
-    y: -radius - random(0, 50),
+    x: random(bounds.innerLeft + margin, bounds.innerRight - margin),
+    y: -radius - random(0, 28),
     radius,
     big,
     hp,
     maxHp: hp,
     shield,
     shieldMax: shield,
-    speed: big ? 30 : 42,
-    shootTimer: random(900, 1800),
+    speed: big ? 34 : 52,
+    shootTimer: random(700, 1400),
     phase: random(0, Math.PI * 2)
   });
   game.spawned += 1;
   game.spawnTimer = allBig
-    ? Math.max(900, 1500 - Math.floor(game.subLevel / 20) * 20)
-    : Math.max(320, 950 - Math.min(game.subLevel, 40) * 16);
+    ? Math.max(520, 1100 - Math.floor(game.subLevel / 20) * 18)
+    : Math.max(140, 520 - Math.min(game.subLevel, 60) * 5);
 }
 
 function shoot(now) {
@@ -464,27 +568,72 @@ function shoot(now) {
   if (now - game.lastShot < gun.fire / multiplier) return;
   game.lastShot = now;
 
-  const columns = Math.min(game.squad.length, 5);
-  for (let i = 0; i < columns; i += 1) {
-    const offset = (i - (columns - 1) / 2) * 9;
+  const bounds = arena();
+  const lane = bounds.corridor * 0.28;
+  // 左中右三管一起直線發射
+  [-lane, 0, lane].forEach((offset) => {
     game.bullets.push({
-      x: game.player.x + offset,
-      y: game.player.y - 26,
-      radius: ammo.size,
-      speed: 540,
+      x: clamp(game.player.x + offset, bounds.innerLeft + 8, bounds.innerRight - 8),
+      y: game.player.y - 18,
+      radius: ammo.size * 0.9,
+      speed: 560,
       damage: bulletDamage(),
-      color: ammo.color
+      color: ammo.color,
+      vx: 0,
+      vy: -560
+    });
+  });
+}
+
+function registerDoorHit(side) {
+  const door = side === "left" ? game.leftDoor : game.rightDoor;
+  if (!door || door.open) return;
+  door.hits = Math.min(door.max, door.hits + 1);
+  if (door.hits >= door.max) {
+    door.open = true;
+    floatingNotice(side === "left" ? "左門開啟！" : "右門開啟！", "#ffe45d");
+    const bounds = arena();
+    const box = doorBox(side, bounds);
+    game.pickups.push({
+      x: box.x + box.w / 2,
+      y: box.y + box.h * 0.55,
+      vx: side === "left" ? 80 : -80,
+      vy: 90,
+      radius: 13,
+      phase: random(0, 6),
+      type: side === "left" ? "member" : "heal"
     });
   }
+  updateHud();
 }
 
 function updateBullets(dt) {
   const bounds = arena();
+  const leftBox = doorBox("left", bounds);
+  const rightBox = doorBox("right", bounds);
+
   for (let i = game.bullets.length - 1; i >= 0; i -= 1) {
     const bullet = game.bullets[i];
-    bullet.y -= bullet.speed * dt;
+    bullet.y += (bullet.vy || -bullet.speed) * dt;
+    bullet.x += (bullet.vx || 0) * dt;
 
-    if (bullet.x <= bounds.innerLeft || bullet.x >= bounds.innerRight) {
+    if (!game.leftDoor.open && pointInBox(bullet, leftBox)) {
+      registerDoorHit("left");
+      burst(bullet.x, bullet.y, "#ffd27a", 5);
+      game.bullets.splice(i, 1);
+      continue;
+    }
+    if (!game.rightDoor.open && pointInBox(bullet, rightBox)) {
+      registerDoorHit("right");
+      burst(bullet.x, bullet.y, "#ffd27a", 5);
+      game.bullets.splice(i, 1);
+      continue;
+    }
+
+    const inOpenLeft = game.leftDoor.open && pointInBox(bullet, leftBox);
+    const inOpenRight = game.rightDoor.open && pointInBox(bullet, rightBox);
+    const outsideLane = bullet.x <= bounds.innerLeft || bullet.x >= bounds.innerRight;
+    if (outsideLane && !inOpenLeft && !inOpenRight) {
       burst(bullet.x, bullet.y, "#c9d8e4", 3);
       game.bullets.splice(i, 1);
       continue;
@@ -520,11 +669,13 @@ function hitEnemy(index, enemy, bullet) {
 }
 
 function updateEnemies(dt) {
+  const bounds = arena();
   for (let i = game.enemies.length - 1; i >= 0; i -= 1) {
     const enemy = game.enemies[i];
-    enemy.phase += dt * 2.2;
+    enemy.phase += dt * 2.6;
     enemy.y += enemy.speed * dt;
-    enemy.x += Math.sin(enemy.phase) * 8 * dt;
+    enemy.x += Math.sin(enemy.phase) * 5 * dt;
+    enemy.x = clamp(enemy.x, bounds.innerLeft + enemy.radius, bounds.innerRight - enemy.radius);
 
     const canShoot = !enemy.big || enemy.shield <= 0;
     if (canShoot) {
@@ -537,14 +688,14 @@ function updateEnemies(dt) {
           y: enemy.y + enemy.radius,
           vx: Math.cos(angle) * bulletSpeed,
           vy: Math.sin(angle) * bulletSpeed,
-          radius: enemy.big ? 5 : 4,
+          radius: enemy.big ? 4.5 : 3.5,
           damage: 1
         });
-        enemy.shootTimer = enemy.big ? random(320, 520) : random(1100, 1700);
+        enemy.shootTimer = enemy.big ? random(320, 520) : random(900, 1400);
       }
     }
 
-    if (distance(enemy, game.player) < enemy.radius + game.player.radius + 4 || enemy.y > view.height + 30) {
+    if (distance(enemy, game.player) < enemy.radius + game.player.radius + 3 || enemy.y > view.height + 30) {
       game.enemies.splice(i, 1);
       damageSquad(1);
     }
@@ -717,19 +868,39 @@ function completeLevel() {
 
   if (completedSub >= goal) {
     showMessage(
-      `第 ${chapter} 章 · 第 ${completedSub} 小關完成！`,
-      `${rewardText}<br>這一章已全部打通。<br>目前分數 ${game.score} 分、星星 ${game.stars} 顆。`,
+      `第 ${chapter} 章 · 第 ${completedSub} 關完成！`,
+      `${rewardText}<br>${randomClearQuote()}<br>這一章已全部打通。<br>目前分數 ${game.score} 分、星星 ${game.stars} 顆。`,
       "回到關卡列表",
       () => returnToHome()
     );
     return;
   }
 
+  const finishedPack = completedSub % PACK_SIZE === 0;
+  const nextPack = packOfSubLevel(completedSub + 1);
   showMessage(
-    `第 ${chapter} 章 · 第 ${completedSub} 小關完成！`,
-    `${rewardText}<br>進度 ${getChapterCleared(chapter)} / ${goal}<br>目前分數 ${game.score} 分、星星 ${game.stars} 顆。`,
-    "進入下一小關",
+    `第 ${chapter} 章 · 第 ${completedSub} 關完成！`,
+    `${rewardText}<br>${randomClearQuote()}<br>進度 ${getChapterCleared(chapter)} / ${goal}${finishedPack ? `<br>已解鎖第 ${nextPack} 組！` : ""}<br>目前分數 ${game.score} 分、星星 ${game.stars} 顆。`,
+    finishedPack ? "前往下一組" : "進入下一關",
     () => {
+      if (finishedPack) {
+        progress.score = game.score;
+        progress.stars = game.stars;
+        progress.chapter = chapter;
+        progress.subLevel = completedSub + 1;
+        saveProgress();
+        cancelAnimationFrame(animationId);
+        animationId = 0;
+        stopMusic();
+        clearPraise();
+        hideMessage();
+        game = null;
+        selectedChapter = chapter;
+        selectedPack = nextPack;
+        hideMenuScreens();
+        openPackLevels(nextPack);
+        return;
+      }
       game.subLevel = completedSub + 1;
       progress.subLevel = game.subLevel;
       saveProgress();
@@ -793,6 +964,8 @@ function updateHud() {
     ui.score.textContent = game.score;
     ui.stars.textContent = game.stars;
     ui.speed.textContent = `${(1 + game.speedLevel * 0.15).toFixed(2)}×`;
+    ui.leftDoor.textContent = game.leftDoor.open ? "已開啟" : `${game.leftDoor.hits}/${game.leftDoor.max}`;
+    ui.rightDoor.textContent = game.rightDoor.open ? "已開啟" : `${game.rightDoor.hits}/${game.rightDoor.max}`;
   }
   ui.gunName.textContent = currentGun().name;
   ui.ammoName.textContent = currentAmmo().name;
@@ -811,6 +984,7 @@ function renderChapterList() {
     if (!isChapterUnlocked(chapter)) break;
     const cleared = getChapterCleared(chapter);
     const goal = chapterGoal(chapter);
+    const packs = packCount(chapter);
     const done = cleared >= goal;
     const current = !done && (chapter === progress.chapter || cleared > 0 || chapter === 1);
     items.push(`
@@ -819,7 +993,7 @@ function renderChapterList() {
         <span class="stage-item-index">${chapter}</span>
         <span class="stage-item-body">
           <span class="stage-item-title">第 ${chapter} 章</span>
-          <span class="stage-item-meta">小關進度 ${cleared} / ${goal}${chapter >= MAX_CHAPTER ? " · 大巨人章節" : ""}</span>
+          <span class="stage-item-meta">共 ${packs} 組（每組 ${PACK_SIZE} 關）· 進度 ${cleared} / ${goal}</span>
         </span>
         <span class="stage-item-status">${done ? "已通關" : cleared > 0 ? "繼續挑戰" : "開始挑戰"}</span>
       </button>
@@ -828,27 +1002,69 @@ function renderChapterList() {
   chapterList.innerHTML = items.join("");
 }
 
-function renderSubLevelList() {
+function renderPackList() {
   const chapter = selectedChapter;
   const goal = chapterGoal(chapter);
   const cleared = getChapterCleared(chapter);
-  const visible = visibleSubLevelCount(chapter);
-  stageSelectTitle.textContent = `第 ${chapter} 章`;
-  stageSelectHint.textContent = `共 ${goal} 小關。第 1 小關先打掉 1 隻大怪；打通後才解鎖下一小關。打完全部 ${goal} 小關後才能解鎖下一章。`;
+  const totalPacks = packCount(chapter);
+  packSelectTitle.textContent = `第 ${chapter} 章 · 關卡組`;
+  packSelectHint.textContent = `共 ${goal} 關，分成 ${totalPacks} 組，每組 ${PACK_SIZE} 關。打完一組才會解鎖下一組。`;
 
   const items = [];
-  for (let sub = 1; sub <= visible; sub += 1) {
-    const isCleared = sub <= cleared;
-    const isCurrent = sub === cleared + 1 || (cleared >= goal && sub === goal);
+  for (let pack = 1; pack <= totalPacks; pack += 1) {
+    const range = packRange(pack);
+    const unlocked = isPackUnlocked(chapter, pack);
+    const packCleared = Math.max(0, Math.min(PACK_SIZE, cleared - (pack - 1) * PACK_SIZE));
+    const done = packCleared >= PACK_SIZE;
+    if (!unlocked) {
+      items.push(`
+        <button class="stage-item locked" type="button" role="listitem" disabled data-pack="${pack}">
+          <span class="stage-item-index">${pack}</span>
+          <span class="stage-item-body">
+            <span class="stage-item-title">第 ${pack} 組</span>
+            <span class="stage-item-meta">第 ${range.start}–${range.end} 關 · 尚未解鎖</span>
+          </span>
+          <span class="stage-item-status">鎖定</span>
+        </button>
+      `);
+      break;
+    }
     items.push(`
-      <button class="stage-item${isCleared ? " cleared" : ""}${isCurrent && !isCleared ? " current" : ""}"
-        type="button" role="listitem" data-sub-level="${sub}">
-        <span class="stage-item-index">${sub}</span>
+      <button class="stage-item${done ? " cleared" : ""}${!done && packCleared >= 0 ? " current" : ""}"
+        type="button" role="listitem" data-pack="${pack}">
+        <span class="stage-item-index">${pack}</span>
         <span class="stage-item-body">
-          <span class="stage-item-title">第 ${sub} 小關</span>
-          <span class="stage-item-meta">${sub === 1 ? "打掉 1 隻大怪即可過關" : `派出 ${Math.min(sub, 80)} 隻敵人 · 難度 ×${difficultyScale(chapter, sub)}`}</span>
+          <span class="stage-item-title">第 ${pack} 組</span>
+          <span class="stage-item-meta">第 ${range.start}–${range.end} 關 · 進度 ${packCleared} / ${PACK_SIZE}</span>
         </span>
-        <span class="stage-item-status">${isCleared ? "已通過" : "挑戰"}</span>
+        <span class="stage-item-status">${done ? "已通關" : packCleared > 0 ? "繼續" : "可挑戰"}</span>
+      </button>
+    `);
+  }
+  packList.innerHTML = items.join("");
+}
+
+function renderSubLevelList() {
+  const chapter = selectedChapter;
+  const pack = selectedPack;
+  const range = packRange(pack);
+  const cleared = getChapterCleared(chapter);
+  stageSelectTitle.textContent = `第 ${chapter} 章 · 第 ${pack} 組`;
+  stageSelectHint.textContent = `這一組是第 ${range.start}–${range.end} 關，共 ${PACK_SIZE} 關，可自由挑選挑戰。`;
+
+  const items = [];
+  for (let sub = range.start; sub <= range.end; sub += 1) {
+    const isCleared = sub <= cleared;
+    const localIndex = sub - range.start + 1;
+    items.push(`
+      <button class="stage-item${isCleared ? " cleared" : ""}"
+        type="button" role="listitem" data-sub-level="${sub}">
+        <span class="stage-item-index">${localIndex}</span>
+        <span class="stage-item-body">
+          <span class="stage-item-title">第 ${sub} 關</span>
+          <span class="stage-item-meta">${sub === 1 ? "打掉 1 隻大怪即可過關" : `密集敵軍約 ${Math.min(Math.ceil(sub * 1.6), 120)} 隻 · 難度 ×${difficultyScale(chapter, sub)}`}</span>
+        </span>
+        <span class="stage-item-status">${isCleared ? "已通過" : "可挑戰"}</span>
       </button>
     `);
   }
@@ -875,23 +1091,70 @@ function drawArena() {
   ctx.fillStyle = gradient;
   ctx.fillRect(0, 0, view.width, view.height);
 
+  // 側牆區塊
   ctx.fillStyle = "#04101fbb";
-  ctx.fillRect(0, 0, bounds.left, view.height);
-  ctx.fillRect(bounds.right, 0, view.width - bounds.right, view.height);
+  ctx.fillRect(0, 0, bounds.innerLeft, view.height);
+  ctx.fillRect(bounds.innerRight, 0, view.width - bounds.innerRight, view.height);
 
-  ctx.globalAlpha = 0.12;
-  ctx.strokeStyle = "#fff";
-  ctx.lineWidth = 1;
-  for (let y = 0; y < view.height; y += 48) {
+  // 中間窄樓梯
+  const stepH = 22;
+  for (let y = 0, i = 0; y < view.height; y += stepH, i += 1) {
+    ctx.fillStyle = i % 2 === 0 ? "#1d4f6ecc" : "#163d56cc";
+    ctx.fillRect(bounds.innerLeft, y, bounds.corridor, stepH);
+    ctx.strokeStyle = "#ffffff22";
     ctx.beginPath();
-    ctx.moveTo(bounds.innerLeft, y);
-    ctx.lineTo(bounds.innerRight, y);
+    ctx.moveTo(bounds.innerLeft, y + stepH);
+    ctx.lineTo(bounds.innerRight, y + stepH);
     ctx.stroke();
   }
-  ctx.globalAlpha = 1;
 
   drawWall(bounds.left, bounds.thickness, 1);
   drawWall(bounds.right, bounds.thickness, -1);
+  drawDoor("left", bounds);
+  drawDoor("right", bounds);
+
+  // 上方狀態條
+  ctx.fillStyle = "#07162de6";
+  ctx.fillRect(bounds.innerLeft, 8, bounds.corridor, 36);
+  ctx.fillStyle = "#d7e8ff";
+  ctx.font = "800 11px Microsoft JhengHei";
+  ctx.textAlign = "center";
+  const leftText = game.leftDoor.open ? "左門已開" : `左門 ${game.leftDoor.hits}/${game.leftDoor.max}`;
+  const rightText = game.rightDoor.open ? "右門已開" : `右門 ${game.rightDoor.hits}/${game.rightDoor.max}`;
+  ctx.fillText(leftText, bounds.mid - bounds.corridor * 0.28, 24);
+  ctx.fillText("窄道樓梯", bounds.mid, 24);
+  ctx.fillText(rightText, bounds.mid + bounds.corridor * 0.28, 24);
+  ctx.fillStyle = "#9eb6d0";
+  ctx.font = "700 10px Microsoft JhengHei";
+  ctx.fillText("只夠小隊與大怪交錯通過", bounds.mid, 38);
+}
+
+function drawDoor(side, bounds) {
+  const door = side === "left" ? game.leftDoor : game.rightDoor;
+  const box = doorBox(side, bounds);
+  const ratio = door.hits / door.max;
+  ctx.save();
+  if (door.open) {
+    ctx.globalAlpha = 0.35;
+    ctx.fillStyle = "#42e69566";
+    ctx.fillRect(box.x, box.y, box.w, box.h);
+    ctx.strokeStyle = "#42e695";
+  } else {
+    ctx.fillStyle = "#6a5138";
+    ctx.fillRect(box.x, box.y, box.w, box.h);
+    ctx.fillStyle = "#3d2c1c";
+    ctx.fillRect(box.x + 4, box.y + 8, box.w - 8, 8);
+    ctx.fillStyle = "#ffd83d";
+    ctx.fillRect(box.x + 4, box.y + box.h - 14, (box.w - 8) * ratio, 6);
+    ctx.strokeStyle = "#e7c48a";
+  }
+  ctx.lineWidth = 2;
+  ctx.strokeRect(box.x + 1, box.y + 1, box.w - 2, box.h - 2);
+  ctx.fillStyle = "#fff8e7";
+  ctx.font = "800 11px Microsoft JhengHei";
+  ctx.textAlign = "center";
+  ctx.fillText(door.open ? "開" : "門", box.x + box.w / 2, box.y + box.h / 2 + 4);
+  ctx.restore();
 }
 
 function drawWall(x, thickness, inward) {
@@ -915,7 +1178,9 @@ function drawDispensers() {
   game.dispensers.forEach((dispenser) => {
     const spot = dispenserSpot(dispenser, bounds);
     const info = dispenserInfo(dispenser.type);
-    const width = dispenser.zone === "middle" ? 92 : Math.min(84, bounds.left * 0.82);
+    const width = dispenser.zone === "middle"
+      ? Math.min(84, bounds.corridor * 0.9)
+      : Math.min(72, Math.max(48, (bounds.innerLeft) * 0.55));
     ctx.save();
     ctx.translate(spot.x, spot.y);
     ctx.fillStyle = "#0d2138ee";
@@ -1033,15 +1298,15 @@ function drawEnemies() {
 function drawSquad() {
   const count = game.squad.length;
   const visible = Math.min(count, 10);
+  const u = SQUAD_SCALE;
   for (let i = visible - 1; i >= 0; i -= 1) {
     const row = Math.floor(i / 5);
     const column = i % 5;
     const rowCount = Math.min(5, visible - row * 5);
-    const offsetX = (column - (rowCount - 1) / 2) * 18;
-    const offsetY = row * 15;
+    const offsetX = (column - (rowCount - 1) / 2) * 12;
+    const offsetY = row * 11;
     const x = game.player.x + offsetX;
     const y = game.player.y + offsetY;
-    const u = 1;
 
     ctx.save();
     ctx.translate(x, y);
@@ -1057,7 +1322,7 @@ function drawSquad() {
     ctx.fillRect(-15 * u, -6 * u, 5 * u, 15 * u);
     ctx.fillRect(10 * u, -6 * u, 5 * u, 13 * u);
     ctx.fillStyle = "#10283d";
-    ctx.fillRect(9 * u, 3 * u, 25 * u, 5 * u);
+    ctx.fillRect(9 * u, 3 * u, 18 * u, 4 * u);
     ctx.fillStyle = "#f1c4a4";
     ctx.beginPath();
     ctx.arc(0, -15 * u, 7 * u, 0, Math.PI * 2);
@@ -1076,11 +1341,11 @@ function drawSquad() {
 
   const active = game.squad[game.squad.length - 1];
   if (active) {
-    const width = 70;
+    const width = 48;
     ctx.fillStyle = "#072238";
-    ctx.fillRect(game.player.x - width / 2, game.player.y + 31, width, 6);
+    ctx.fillRect(game.player.x - width / 2, game.player.y + 22, width, 5);
     ctx.fillStyle = "#46e991";
-    ctx.fillRect(game.player.x - width / 2, game.player.y + 31, width * Math.max(0, active.hp / active.maxHp), 6);
+    ctx.fillRect(game.player.x - width / 2, game.player.y + 22, width * Math.max(0, active.hp / active.maxHp), 5);
   }
 }
 
@@ -1408,10 +1673,15 @@ function toggleMusic() {
 pauseButton.addEventListener("click", togglePause);
 musicButton.addEventListener("click", toggleMusic);
 document.querySelector("#homeButton").addEventListener("click", () => {
-  if (selectedChapter && isChapterUnlocked(selectedChapter)) returnToStageSelect();
-  else returnToHome();
+  if (selectedPack && isPackUnlocked(selectedChapter, selectedPack)) returnToStageSelect();
+  else returnToPackSelect();
 });
-document.querySelector("#backToHomeButton").addEventListener("click", returnToHome);
+document.querySelector("#backToHomeFromPackButton").addEventListener("click", returnToHome);
+document.querySelector("#backToPackButton").addEventListener("click", () => {
+  hideMenuScreens();
+  packSelectScreen.hidden = false;
+  renderPackList();
+});
 document.querySelector("#rulesButton").addEventListener("click", () => rulesDialog.showModal());
 document.querySelector("#resetButton").addEventListener("click", resetProgress);
 
@@ -1419,6 +1689,12 @@ chapterList.addEventListener("click", (event) => {
   const item = event.target.closest("[data-chapter]");
   if (!item) return;
   openStageSelect(Number(item.dataset.chapter));
+});
+
+packList.addEventListener("click", (event) => {
+  const item = event.target.closest("[data-pack]");
+  if (!item || item.disabled) return;
+  openPackLevels(Number(item.dataset.pack));
 });
 
 subLevelList.addEventListener("click", (event) => {
@@ -1501,8 +1777,8 @@ canvas.addEventListener("pointermove", (event) => {
   if (!dragging || !game) return;
   const bounds = arena();
   const rect = canvas.getBoundingClientRect();
-  game.player.x = clamp(event.clientX - rect.left, bounds.innerLeft + 24, bounds.innerRight - 24);
-  game.player.y = clamp(event.clientY - rect.top, view.height * 0.68, view.height - 35);
+  game.player.x = clamp(event.clientX - rect.left, bounds.innerLeft + 16, bounds.innerRight - 16);
+  game.player.y = clamp(event.clientY - rect.top, view.height * 0.68, view.height - 28);
 });
 canvas.addEventListener("pointerup", () => {
   dragging = false;

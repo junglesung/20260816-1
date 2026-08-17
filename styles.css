@@ -537,9 +537,11 @@ h1 {
 
 .stats {
   display: flex;
-  gap: clamp(8px, 2vw, 22px);
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: clamp(6px, 1.5vw, 14px);
   color: var(--muted);
-  font-size: .88rem;
+  font-size: clamp(.72rem, 2vw, .88rem);
 }
 
 .stats strong {
