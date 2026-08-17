@@ -81,6 +81,7 @@ let progress = loadProgress();
 let selectedChapter = 1;
 let selectedPack = 1;
 let fireAim = "front";
+let usingPointer = false;
 let view = { width: 900, height: 620, dpr: 1 };
 let lastFrame = 0;
 let animationId = 0;
@@ -142,7 +143,11 @@ function loadProgress() {
     ammoIndex: 0,
     chapterCleared: defaultChapterCleared(),
     chapter: 1,
-    subLevel: 1
+    subLevel: 1,
+    leftWallBroken: false,
+    rightWallBroken: false,
+    leftWallCleared: false,
+    rightWallCleared: false
   };
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
@@ -160,7 +165,11 @@ function loadProgress() {
       ammoIndex: clamp(Number(saved.ammoIndex) || 0, 0, ammos.length - 1),
       chapterCleared,
       chapter,
-      subLevel
+      subLevel,
+      leftWallBroken: Boolean(saved.leftWallBroken),
+      rightWallBroken: Boolean(saved.rightWallBroken),
+      leftWallCleared: Boolean(saved.leftWallCleared),
+      rightWallCleared: Boolean(saved.rightWallCleared)
     };
   } catch (error) {
     return fallback;
@@ -248,6 +257,10 @@ function makeGame(chapter, subLevel) {
     edgeTimer: 0,
     falling: false,
     fallVy: 0,
+    walls: {
+      left: { broken: Boolean(progress.leftWallBroken), cleared: Boolean(progress.leftWallCleared) },
+      right: { broken: Boolean(progress.rightWallBroken), cleared: Boolean(progress.rightWallCleared) }
+    },
     shield: { active: false, time: 0, color: "blue", plates: [] },
     laser: { active: false, time: 0, pulse: 0 },
     bomb: { active: false, time: 0 },
@@ -424,6 +437,10 @@ function beginLevel() {
   game.edgeTimer = 0;
   game.falling = false;
   game.fallVy = 0;
+  game.walls = {
+    left: { broken: Boolean(progress.leftWallBroken), cleared: Boolean(progress.leftWallCleared) },
+    right: { broken: Boolean(progress.rightWallBroken), cleared: Boolean(progress.rightWallCleared) }
+  };
   game.shield = { active: false, time: 0, color: "blue", plates: [] };
   game.laser = { active: false, time: 0, pulse: 0 };
   game.bomb = { active: false, time: 0 };
@@ -515,37 +532,79 @@ function updatePlayer(dt) {
   }
 
   const speed = Math.max(230, view.width * 0.38);
-  if (keys.left) game.player.x -= speed * dt;
-  if (keys.right) game.player.x += speed * dt;
+  if (!usingPointer) {
+    if (keys.left) game.player.x -= speed * dt;
+    if (keys.right) game.player.x += speed * dt;
+  }
   if (keys.back) game.player.y += speed * 0.58 * dt;
-  if (!keys.back) {
+  if (!keys.back && !usingPointer) {
     const homeY = view.height - 52;
     game.player.y += (homeY - game.player.y) * Math.min(1, dt * 5);
   }
 
   const leftEdge = bounds.innerLeft + 16;
   const rightEdge = bounds.innerRight - 16;
-  const atLeft = game.player.x <= leftEdge + 1;
-  const atRight = game.player.x >= rightEdge - 1;
-  if ((atLeft && keys.left) || (atRight && keys.right)) {
-    game.edgeTimer += dt;
-    if (game.edgeTimer >= EDGE_HOLD) {
-      startFalling(atLeft ? "left" : "right");
-      return;
-    }
-  } else {
-    game.edgeTimer = Math.max(0, game.edgeTimer - dt * 1.8);
-  }
-
+  // 按鍵／螢幕按鈕操作：只在通道內移動，不會撞牆、也不會掉下去
   game.player.x = clamp(game.player.x, leftEdge, rightEdge);
   game.player.y = clamp(game.player.y, view.height * 0.68, view.height - 28);
+  if (game.player.x > leftEdge + 8 && game.player.x < rightEdge - 8) {
+    markWallsCleared();
+  }
+}
+
+function markWallsCleared() {
+  if (!game.walls) return;
+  let changed = false;
+  if (game.walls.left.broken && !game.walls.left.cleared) {
+    game.walls.left.cleared = true;
+    changed = true;
+  }
+  if (game.walls.right.broken && !game.walls.right.cleared) {
+    game.walls.right.cleared = true;
+    changed = true;
+  }
+  if (changed) persistWalls();
+}
+
+function persistWalls() {
+  progress.leftWallBroken = game.walls.left.broken;
+  progress.rightWallBroken = game.walls.right.broken;
+  progress.leftWallCleared = game.walls.left.cleared;
+  progress.rightWallCleared = game.walls.right.cleared;
+  saveProgress();
+}
+
+function smashWall(side) {
+  const wall = game.walls[side];
+  if (wall.broken) return;
+  wall.broken = true;
+  wall.cleared = false;
+  persistWalls();
+  const bounds = arena();
+  const x = side === "left" ? bounds.innerLeft : bounds.innerRight;
+  burst(x, game.player.y, "#e8eef4", 28);
+  burst(x, game.player.y, "#9aa8b6", 16);
+  floatingNotice("白色城牆撞爛了！再過來就會掉下去", "#e8eef4");
+}
+
+function tryPushBrokenWall(side) {
+  const wall = game.walls[side];
+  if (!wall.broken) {
+    smashWall(side);
+    return false;
+  }
+  if (wall.cleared) {
+    startFalling();
+    return true;
+  }
+  return false;
 }
 
 function startFalling() {
   if (game.falling || game.over) return;
   game.falling = true;
   game.fallVy = 40;
-  floatingNotice("滑到最旁邊，掉下去了！", "#ffd27a");
+  floatingNotice("從破牆掉下去了！", "#ffd27a");
 }
 
 function stripWeapons() {
@@ -560,7 +619,7 @@ function stripWeapons() {
 function fallToDeath() {
   if (game.over) return;
   stripWeapons();
-  floatingNotice("槍械全部掉光，只剩練習手槍！", "#ff7187");
+  floatingNotice("槍跟子彈全部掉光，只剩一開始的練習手槍！", "#ff7187");
   game.falling = false;
   game.fallVy = 0;
   const bounds = arena();
@@ -1505,13 +1564,39 @@ function drawWall(x, thickness, inward, side) {
     if (box && y + brick > box.y && y < box.y + box.h) continue;
     ctx.fillRect(wallLeft, y + brick - 3, thickness, 3);
   }
-  ctx.fillStyle = "#b6c4d1";
-  for (let y = 6; y < view.height; y += brick * 2) {
-    if (box && y + brick > box.y && y < box.y + box.h) continue;
-    ctx.fillRect(x + inward * (thickness / 2 - 5), y, 5, brick);
+  const broken = game.walls?.[side]?.broken;
+  if (broken) {
+    ctx.fillStyle = "#2a3138";
+    ctx.fillRect(wallLeft, 0, thickness, view.height);
+    ctx.fillStyle = "#6d7780";
+    for (let y = 10; y < view.height; y += 34) {
+      ctx.beginPath();
+      ctx.moveTo(wallLeft + 2, y);
+      ctx.lineTo(wallRight - 2, y + 18);
+      ctx.lineTo(wallLeft + 6, y + 28);
+      ctx.strokeStyle = "#c5ced6";
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+    ctx.fillStyle = "#8b97a2";
+    ctx.font = "800 11px Microsoft JhengHei";
+    ctx.textAlign = "center";
+    ctx.fillText("已撞爛", (wallLeft + wallRight) / 2, view.height * 0.55);
+    if (box) {
+      ctx.fillStyle = "#121820";
+      const notchX = side === "left" ? Math.min(wallLeft, box.x) : Math.max(wallLeft, box.x - 2);
+      const notchRight = side === "left" ? Math.min(wallRight + 8, box.x + box.w) : wallRight;
+      ctx.fillRect(notchX, box.y - 4, Math.max(10, notchRight - notchX), box.h + 8);
+    }
+  } else {
+    ctx.fillStyle = "#b6c4d1";
+    for (let y = 6; y < view.height; y += brick * 2) {
+      if (box && y + brick > box.y && y < box.y + box.h) continue;
+      ctx.fillRect(x + inward * (thickness / 2 - 5), y, 5, brick);
+    }
+    ctx.fillStyle = "#cfdae6";
+    ctx.fillRect(wallLeft, 0, thickness, 3);
   }
-  ctx.fillStyle = "#cfdae6";
-  ctx.fillRect(wallLeft, 0, thickness, 3);
 }
 
 function drawDispensers() {
@@ -1909,7 +1994,11 @@ function resetProgress() {
     ammoIndex: 0,
     chapterCleared: defaultChapterCleared(),
     chapter: 1,
-    subLevel: 1
+    subLevel: 1,
+    leftWallBroken: false,
+    rightWallBroken: false,
+    leftWallCleared: false,
+    rightWallCleared: false
   };
   selectedChapter = 1;
   saveProgress();
@@ -1919,6 +2008,7 @@ function resetProgress() {
 }
 
 function setDirection(direction, pressed) {
+  usingPointer = false;
   keys[direction] = pressed;
   document.querySelector(`[data-direction="${direction}"]`)?.classList.toggle("active", pressed);
 }
@@ -2182,17 +2272,32 @@ window.addEventListener("keyup", (event) => {
 let dragging = false;
 canvas.addEventListener("pointerdown", (event) => {
   dragging = true;
+  usingPointer = true;
   canvas.setPointerCapture(event.pointerId);
 });
 canvas.addEventListener("pointermove", (event) => {
-  if (!dragging || !game) return;
+  if (!dragging || !game || game.falling || game.over) return;
+  usingPointer = true;
   const bounds = arena();
   const rect = canvas.getBoundingClientRect();
-  game.player.x = clamp(event.clientX - rect.left, bounds.innerLeft + 16, bounds.innerRight - 16);
+  const x = event.clientX - rect.left;
+  const leftEdge = bounds.innerLeft + 16;
+  const rightEdge = bounds.innerRight - 16;
+  if (x < leftEdge) {
+    tryPushBrokenWall("left");
+    game.player.x = leftEdge;
+  } else if (x > rightEdge) {
+    tryPushBrokenWall("right");
+    game.player.x = rightEdge;
+  } else {
+    game.player.x = clamp(x, leftEdge, rightEdge);
+    if (x > leftEdge + 8 && x < rightEdge - 8) markWallsCleared();
+  }
   game.player.y = clamp(event.clientY - rect.top, view.height * 0.68, view.height - 28);
 });
 canvas.addEventListener("pointerup", () => {
   dragging = false;
+  usingPointer = false;
 });
 
 window.addEventListener("resize", resizeCanvas);
