@@ -513,8 +513,8 @@ function updateDispensers(dt) {
 }
 
 function dispenserSpot(dispenser, bounds) {
-  if (dispenser.zone === "left") return { x: bounds.left / 2, y: view.height * 0.3 };
-  if (dispenser.zone === "right") return { x: (bounds.right + view.width) / 2, y: view.height * 0.3 };
+  if (dispenser.zone === "left") return { x: bounds.innerLeft * 0.45, y: view.height * 0.28 };
+  if (dispenser.zone === "right") return { x: bounds.innerRight + (view.width - bounds.innerRight) * 0.55, y: view.height * 0.28 };
   return { x: view.width / 2, y: view.height * 0.11 };
 }
 
