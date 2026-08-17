@@ -36,9 +36,10 @@ const ui = {
 
 const MAX_CHAPTER = 10;
 const MEMBER_HP = 1111;
-const DOOR_HITS_NEEDED = 500;
+const DOOR_HITS_NEEDED = 580;
 const PACK_SIZE = 10;
 const SQUAD_SCALE = 0.68;
+const FIXED_SPEED_MULT = 2.5;
 const CLEAR_QUOTES = [
   "漂亮！這一波清得乾乾淨淨。",
   "藍色小隊再下一城！",
@@ -222,11 +223,11 @@ function makeGame(chapter, subLevel) {
     pickups: [],
     dispensers: [
       { type: "member", zone: "left", timer: 3.5, interval: 11 },
-      { type: "heal", zone: "right", timer: 6, interval: 10 },
+      { type: "firerate", zone: "right", timer: 6, interval: 10 },
       { type: "firerate", zone: "middle", timer: 2.5, interval: 7.5 }
     ],
-    leftDoor: { hits: 0, max: DOOR_HITS_NEEDED, open: false },
-    rightDoor: { hits: 0, max: DOOR_HITS_NEEDED, open: false },
+    leftDoor: { hits: 0, max: DOOR_HITS_NEEDED, open: false, spin: 0 },
+    rightDoor: { hits: 0, max: DOOR_HITS_NEEDED, open: false, spin: 0 },
     speedLevel: 0,
     lastShot: 0,
     spawnTimer: 0,
@@ -251,13 +252,14 @@ function arena() {
 }
 
 function doorBox(side, bounds = arena()) {
-  const width = clamp(bounds.thickness * 0.72, 28, 54);
-  const height = clamp(view.height * 0.28, 110, 180);
-  const y = view.height * 0.16;
+  const width = clamp(bounds.thickness * 0.55, 22, 40);
+  const height = clamp(view.height * 0.26, 100, 168);
+  const y = view.height * 0.18;
+  // 凹進通道一點，方便左右管打到門
   if (side === "left") {
-    return { x: bounds.innerLeft - width, y, w: width + 6, h: height };
+    return { x: bounds.innerLeft - width + 10, y, w: width + 4, h: height };
   }
-  return { x: bounds.innerRight - 6, y, w: width + 6, h: height };
+  return { x: bounds.innerRight - 14, y, w: width + 4, h: height };
 }
 
 function pointInBox(point, box) {
@@ -399,8 +401,8 @@ function beginLevel() {
   game.enemyBullets.length = 0;
   game.pickups.length = 0;
   game.particles.length = 0;
-  game.leftDoor = { hits: 0, max: DOOR_HITS_NEEDED, open: false };
-  game.rightDoor = { hits: 0, max: DOOR_HITS_NEEDED, open: false };
+  game.leftDoor = { hits: 0, max: DOOR_HITS_NEEDED, open: false, spin: 0 };
+  game.rightDoor = { hits: 0, max: DOOR_HITS_NEEDED, open: false, spin: 0 };
   game.dispensers.forEach((dispenser, index) => {
     dispenser.timer = 2.5 + index * 1.5;
   });
@@ -468,6 +470,8 @@ function update(dt, now) {
   updateEnemyBullets(dt);
   updatePickups(dt);
   updateParticles(dt);
+  game.leftDoor.spin += dt * 2.8;
+  game.rightDoor.spin += dt * 2.8;
 
   if (game.spawned >= game.enemyTotal && game.enemies.length === 0 && !game.over) {
     completeLevel();
@@ -551,7 +555,7 @@ function spawnEnemies(dt) {
     maxHp: hp,
     shield,
     shieldMax: shield,
-    speed: big ? 34 : 52,
+    speed: (big ? 30 : 46) * FIXED_SPEED_MULT,
     shootTimer: random(700, 1400),
     phase: random(0, Math.PI * 2)
   });
@@ -564,16 +568,16 @@ function spawnEnemies(dt) {
 function shoot(now) {
   const gun = currentGun();
   const ammo = currentAmmo();
-  const multiplier = 1 + game.speedLevel * 0.15;
-  if (now - game.lastShot < gun.fire / multiplier) return;
+  // 射速固定 2.5 倍，不隨人數或補給疊加速度
+  if (now - game.lastShot < gun.fire / FIXED_SPEED_MULT) return;
   game.lastShot = now;
 
   const bounds = arena();
-  const lane = bounds.corridor * 0.28;
-  // 左中右三管一起直線發射
+  const lane = bounds.corridor * 0.32;
+  // 左中右三管一起直線發射（人數再多也一樣）
   [-lane, 0, lane].forEach((offset) => {
     game.bullets.push({
-      x: clamp(game.player.x + offset, bounds.innerLeft + 8, bounds.innerRight - 8),
+      x: clamp(game.player.x + offset, bounds.innerLeft + 6, bounds.innerRight - 6),
       y: game.player.y - 18,
       radius: ammo.size * 0.9,
       speed: 560,
@@ -591,7 +595,7 @@ function registerDoorHit(side) {
   door.hits = Math.min(door.max, door.hits + 1);
   if (door.hits >= door.max) {
     door.open = true;
-    floatingNotice(side === "left" ? "左門開啟！" : "右門開啟！", "#ffe45d");
+    floatingNotice(side === "left" ? "左鐵門開啟！" : "右鐵門開啟！", "#c9d6e8");
     const bounds = arena();
     const box = doorBox(side, bounds);
     game.pickups.push({
@@ -601,7 +605,7 @@ function registerDoorHit(side) {
       vy: 90,
       radius: 13,
       phase: random(0, 6),
-      type: side === "left" ? "member" : "heal"
+      type: side === "left" ? "member" : "firerate"
     });
   }
   updateHud();
@@ -682,7 +686,8 @@ function updateEnemies(dt) {
       enemy.shootTimer -= dt * 1000;
       if (enemy.shootTimer <= 0 && enemy.y > 20 && enemy.y < view.height * 0.72) {
         const angle = Math.atan2(game.player.y - enemy.y, game.player.x - enemy.x);
-        const bulletSpeed = Math.min(2200, 185 * Math.min(12, 1 + Math.log2(Math.max(2, enemyLevelScale()))));
+        // 敵方射速／彈速固定 2.5 倍，不再隨關卡狂加速
+        const bulletSpeed = 210 * FIXED_SPEED_MULT;
         game.enemyBullets.push({
           x: enemy.x,
           y: enemy.y + enemy.radius,
@@ -691,7 +696,7 @@ function updateEnemies(dt) {
           radius: enemy.big ? 4.5 : 3.5,
           damage: 1
         });
-        enemy.shootTimer = enemy.big ? random(320, 520) : random(900, 1400);
+        enemy.shootTimer = (enemy.big ? random(320, 520) : random(900, 1400)) / FIXED_SPEED_MULT;
       }
     }
 
@@ -741,16 +746,9 @@ function collectPickup(pickup) {
     game.squad.push({ hp: MEMBER_HP, maxHp: MEMBER_HP });
     burst(pickup.x, pickup.y, "#58e6ff", 14);
     floatingNotice("增員 +1！", "#58e6ff");
-  } else if (pickup.type === "heal") {
-    game.squad.forEach((member) => {
-      member.hp = member.maxHp;
-    });
-    burst(pickup.x, pickup.y, "#ff8ec4", 14);
-    floatingNotice("補血！全隊回滿", "#ff8ec4");
   } else if (pickup.type === "firerate") {
-    game.speedLevel = Math.min(10, game.speedLevel + 1);
     burst(pickup.x, pickup.y, "#ffe45d", 14);
-    floatingNotice(`加射速！${(1 + game.speedLevel * 0.15).toFixed(2)} 倍`, "#ffe45d");
+    floatingNotice(`射速固定 ${FIXED_SPEED_MULT} 倍！`, "#ffe45d");
   } else {
     const value = pickup.type === "starBig" ? 5 : 1;
     game.stars += value;
@@ -963,7 +961,7 @@ function updateHud() {
     ui.squad.textContent = game.squad.length;
     ui.score.textContent = game.score;
     ui.stars.textContent = game.stars;
-    ui.speed.textContent = `${(1 + game.speedLevel * 0.15).toFixed(2)}×`;
+    ui.speed.textContent = `${FIXED_SPEED_MULT.toFixed(1)}×`;
     ui.leftDoor.textContent = game.leftDoor.open ? "已開啟" : `${game.leftDoor.hits}/${game.leftDoor.max}`;
     ui.rightDoor.textContent = game.rightDoor.open ? "已開啟" : `${game.rightDoor.hits}/${game.rightDoor.max}`;
   }
@@ -1108,8 +1106,8 @@ function drawArena() {
     ctx.stroke();
   }
 
-  drawWall(bounds.left, bounds.thickness, 1);
-  drawWall(bounds.right, bounds.thickness, -1);
+  drawWall(bounds.left, bounds.thickness, 1, "left");
+  drawWall(bounds.right, bounds.thickness, -1, "right");
   drawDoor("left", bounds);
   drawDoor("right", bounds);
 
@@ -1119,58 +1117,108 @@ function drawArena() {
   ctx.fillStyle = "#d7e8ff";
   ctx.font = "800 11px Microsoft JhengHei";
   ctx.textAlign = "center";
-  const leftText = game.leftDoor.open ? "左門已開" : `左門 ${game.leftDoor.hits}/${game.leftDoor.max}`;
-  const rightText = game.rightDoor.open ? "右門已開" : `右門 ${game.rightDoor.hits}/${game.rightDoor.max}`;
+  const leftText = game.leftDoor.open ? "左門已開" : `左門 ${game.leftDoor.hits}/580`;
+  const rightText = game.rightDoor.open ? "右門已開" : `右門 ${game.rightDoor.hits}/580`;
   ctx.fillText(leftText, bounds.mid - bounds.corridor * 0.28, 24);
   ctx.fillText("窄道樓梯", bounds.mid, 24);
   ctx.fillText(rightText, bounds.mid + bounds.corridor * 0.28, 24);
   ctx.fillStyle = "#9eb6d0";
   ctx.font = "700 10px Microsoft JhengHei";
-  ctx.fillText("只夠小隊與大怪交錯通過", bounds.mid, 38);
+  ctx.fillText(`雙方射速固定 ${FIXED_SPEED_MULT} 倍`, bounds.mid, 38);
 }
 
 function drawDoor(side, bounds) {
   const door = side === "left" ? game.leftDoor : game.rightDoor;
   const box = doorBox(side, bounds);
   const ratio = door.hits / door.max;
+  const cx = box.x + box.w / 2;
+  const cy = box.y + 16;
   ctx.save();
   if (door.open) {
-    ctx.globalAlpha = 0.35;
-    ctx.fillStyle = "#42e69566";
+    ctx.globalAlpha = 0.4;
+    ctx.fillStyle = "#8fa4b866";
     ctx.fillRect(box.x, box.y, box.w, box.h);
-    ctx.strokeStyle = "#42e695";
+    ctx.strokeStyle = "#c5d4e4";
   } else {
-    ctx.fillStyle = "#6a5138";
+    // 鐵門配色
+    const iron = ctx.createLinearGradient(box.x, box.y, box.x + box.w, box.y);
+    iron.addColorStop(0, "#3a4552");
+    iron.addColorStop(0.45, "#7b8796");
+    iron.addColorStop(1, "#2b333d");
+    ctx.fillStyle = iron;
     ctx.fillRect(box.x, box.y, box.w, box.h);
-    ctx.fillStyle = "#3d2c1c";
-    ctx.fillRect(box.x + 4, box.y + 8, box.w - 8, 8);
-    ctx.fillStyle = "#ffd83d";
-    ctx.fillRect(box.x + 4, box.y + box.h - 14, (box.w - 8) * ratio, 6);
-    ctx.strokeStyle = "#e7c48a";
+    ctx.fillStyle = "#1c222a";
+    for (let y = box.y + 28; y < box.y + box.h - 24; y += 14) {
+      ctx.fillRect(box.x + 5, y, box.w - 10, 3);
+    }
+    ctx.fillStyle = "#d7e3f0";
+    ctx.fillRect(box.x + 4, box.y + box.h - 18, (box.w - 8) * ratio, 7);
+    ctx.strokeStyle = "#aeb9c7";
   }
   ctx.lineWidth = 2;
   ctx.strokeRect(box.x + 1, box.y + 1, box.w - 2, box.h - 2);
-  ctx.fillStyle = "#fff8e7";
-  ctx.font = "800 11px Microsoft JhengHei";
+
+  // 門上旋轉輪
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.rotate(door.spin || 0);
+  ctx.strokeStyle = "#d5dee8";
+  ctx.fillStyle = "#5c6775";
+  ctx.lineWidth = 2;
+  ctx.beginPath();
+  ctx.arc(0, 0, 9, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.stroke();
+  for (let i = 0; i < 4; i += 1) {
+    const a = (Math.PI / 2) * i;
+    ctx.beginPath();
+    ctx.moveTo(Math.cos(a) * 3, Math.sin(a) * 3);
+    ctx.lineTo(Math.cos(a) * 9, Math.sin(a) * 9);
+    ctx.stroke();
+  }
+  ctx.restore();
+
+  ctx.fillStyle = "#eef5ff";
+  ctx.font = "900 12px Microsoft JhengHei";
   ctx.textAlign = "center";
-  ctx.fillText(door.open ? "開" : "門", box.x + box.w / 2, box.y + box.h / 2 + 4);
+  ctx.fillText(door.open ? "開" : `${door.hits}`, cx, box.y + box.h * 0.55);
+  ctx.font = "800 10px Microsoft JhengHei";
+  ctx.fillStyle = "#b7c4d4";
+  ctx.fillText(door.open ? "鐵門" : `/ ${door.max}`, cx, box.y + box.h * 0.55 + 14);
   ctx.restore();
 }
 
-function drawWall(x, thickness, inward) {
+function drawWall(x, thickness, inward, side) {
   const brick = 26;
+  const box = side ? doorBox(side) : null;
+  const wallLeft = x - thickness / 2;
+  const wallRight = x + thickness / 2;
+
+  // 整面牆，但門位挖凹槽（去掉一塊淺色牆）
   ctx.fillStyle = "#8d9bab";
-  ctx.fillRect(x - thickness / 2, 0, thickness, view.height);
+  ctx.fillRect(wallLeft, 0, thickness, view.height);
+  if (box) {
+    const notchX = side === "left" ? Math.min(wallLeft, box.x) : Math.max(wallLeft, box.x - 2);
+    const notchRight = side === "left" ? Math.min(wallRight + 8, box.x + box.w) : wallRight;
+    const notchW = Math.max(10, notchRight - notchX);
+    ctx.fillStyle = "#121820";
+    ctx.fillRect(notchX, box.y - 4, notchW, box.h + 8);
+    ctx.strokeStyle = "#2a3542";
+    ctx.strokeRect(notchX + 0.5, box.y - 3.5, notchW - 1, box.h + 7);
+  }
+
   ctx.fillStyle = "#6d7b8b";
   for (let y = 0; y < view.height; y += brick) {
-    ctx.fillRect(x - thickness / 2, y + brick - 3, thickness, 3);
+    if (box && y + brick > box.y && y < box.y + box.h) continue;
+    ctx.fillRect(wallLeft, y + brick - 3, thickness, 3);
   }
   ctx.fillStyle = "#b6c4d1";
   for (let y = 6; y < view.height; y += brick * 2) {
+    if (box && y + brick > box.y && y < box.y + box.h) continue;
     ctx.fillRect(x + inward * (thickness / 2 - 5), y, 5, brick);
   }
   ctx.fillStyle = "#cfdae6";
-  ctx.fillRect(x - thickness / 2, 0, thickness, 3);
+  ctx.fillRect(wallLeft, 0, thickness, 3);
 }
 
 function drawDispensers() {
@@ -1201,7 +1249,6 @@ function drawDispensers() {
 
 function dispenserInfo(type) {
   if (type === "member") return { title: "加一人", color: "#40d9ff" };
-  if (type === "heal") return { title: "補血", color: "#ff8ec4" };
   return { title: "加射速", color: "#ffe14c" };
 }
 
