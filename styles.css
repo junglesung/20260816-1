@@ -472,8 +472,11 @@ h1 {
 .game-screen {
   display: flex;
   flex-direction: column;
+  height: 100dvh;
+  max-height: 100dvh;
   min-height: 100dvh;
-  padding: 10px max(10px, env(safe-area-inset-right)) max(10px, env(safe-area-inset-bottom)) max(10px, env(safe-area-inset-left));
+  overflow: hidden;
+  padding: 4px max(8px, env(safe-area-inset-right)) max(6px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left));
 }
 
 .hud,
@@ -481,21 +484,22 @@ h1 {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 14px;
+  gap: 6px 10px;
   width: min(1100px, 100%);
   margin: 0 auto;
 }
 
 .hud {
-  min-height: 48px;
+  min-height: 0;
+  flex-shrink: 0;
 }
 
 .hud-brand {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   color: var(--blue-light);
-  font-size: 1.1rem;
+  font-size: .85rem;
 }
 
 .icon-button,
@@ -510,8 +514,9 @@ h1 {
 }
 
 .icon-button {
-  width: 29px;
-  height: 29px;
+  width: 24px;
+  height: 24px;
+  font-size: .78rem;
 }
 
 .home-button {
@@ -539,9 +544,10 @@ h1 {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
-  gap: clamp(6px, 1.5vw, 14px);
+  gap: clamp(3px, 1vw, 8px);
   color: var(--muted);
-  font-size: clamp(.72rem, 2vw, .88rem);
+  font-size: clamp(.55rem, 1.5vw, .68rem);
+  line-height: 1.25;
 }
 
 .stats strong {
@@ -549,12 +555,13 @@ h1 {
 }
 
 .weapon-bar {
-  min-height: 54px;
-  padding: 7px 12px;
+  min-height: 0;
+  flex-shrink: 0;
+  padding: 3px 8px;
   border: 1px solid #ffffff1f;
-  border-radius: 12px 12px 0 0;
+  border-radius: 8px 8px 0 0;
   background: #0e2544;
-  font-size: .82rem;
+  font-size: .68rem;
 }
 
 .weapon-bar .label {
@@ -680,13 +687,13 @@ h1 {
 }
 
 .aim-button {
-  padding: 7px 10px;
+  padding: 3px 7px;
   border: 1px solid #ffffff3d;
-  border-radius: 9px;
+  border-radius: 7px;
   background: #0d224099;
   color: #d7e6f7;
   cursor: pointer;
-  font-size: .74rem;
+  font-size: .64rem;
   font-weight: 800;
 }
 
@@ -697,13 +704,13 @@ h1 {
 }
 
 .weapon-bar button {
-  padding: 8px 12px;
+  padding: 4px 8px;
   border: 0;
-  border-radius: 9px;
+  border-radius: 7px;
   background: var(--yellow);
   color: #17243b;
   cursor: pointer;
-  font-size: .76rem;
+  font-size: .64rem;
   font-weight: 900;
 }
 
@@ -728,12 +735,11 @@ h1 {
 .game-wrap {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(38px, 52px) minmax(0, 1fr) minmax(38px, 52px);
+  grid-template-columns: minmax(34px, 48px) minmax(0, 1fr) minmax(34px, 48px);
   grid-template-rows: minmax(0, 1fr);
   width: min(1100px, 100%);
-  flex: 1;
-  min-height: 320px;
-  max-height: calc(100dvh - 280px);
+  flex: 1 1 0;
+  min-height: 0;
   margin: 0 auto;
   overflow: hidden;
   border: 3px solid #373737;
@@ -806,22 +812,23 @@ h1 {
 .controls {
   display: flex;
   justify-content: center;
-  gap: 12px;
+  gap: 10px;
   width: min(500px, 100%);
-  margin: 10px auto 0;
+  flex-shrink: 0;
+  margin: 6px auto 0;
 }
 
 .move-button {
   display: flex;
   align-items: center;
   justify-content: center;
-  gap: 7px;
-  width: 120px;
-  min-height: 54px;
+  gap: 6px;
+  width: 110px;
+  min-height: 44px;
   border: 1px solid #ffffff32;
-  border-radius: 15px;
+  border-radius: 12px;
   background: linear-gradient(#183b65, #102747);
-  box-shadow: 0 5px 0 #071326;
+  box-shadow: 0 4px 0 #071326;
   color: #fff;
   cursor: pointer;
   user-select: none;
@@ -847,9 +854,10 @@ h1 {
 }
 
 .keyboard-tip {
-  margin: 8px 0 0;
+  flex-shrink: 0;
+  margin: 4px 0 0;
   color: #7089a5;
-  font-size: .73rem;
+  font-size: .64rem;
   text-align: center;
 }
 
@@ -964,46 +972,22 @@ dialog p {
   }
 
   .hud {
-    align-items: flex-start;
+    align-items: center;
   }
 
-  .home-button,
-  .mc-exit-button {
-    padding: 6px 10px;
-    font-size: .76rem;
+  .home-button {
+    padding: 4px 8px;
+    font-size: .68rem;
   }
 
   .stats {
-    width: 100%;
-    justify-content: space-between;
-  }
-
-  .weapon-bar {
-    flex-wrap: wrap;
-    gap: 6px 12px;
-    font-size: .76rem;
-  }
-
-  .weapon-bar #openArsenal {
-    width: 100%;
-  }
-
-  .aim-switch {
-    width: 100%;
-  }
-
-  .aim-switch-row {
-    width: 100%;
-  }
-
-  .aim-button {
+    width: auto;
+    max-width: 100%;
     flex: 1;
-  }
-
-  .stats {
+    justify-content: flex-end;
     flex-wrap: wrap;
-    gap: 4px 12px;
-    font-size: .78rem;
+    gap: 2px 8px;
+    font-size: .55rem;
   }
 
   .progress-row {
@@ -1019,8 +1003,8 @@ dialog p {
   }
 
   .game-wrap {
-    min-height: 370px;
-    max-height: calc(100dvh - 250px);
+    min-height: 0;
+    max-height: none;
   }
 
   .move-button {
@@ -1028,6 +1012,10 @@ dialog p {
   }
 
   .keyboard-tip {
+    display: none;
+  }
+
+  .mc-hotbar-label {
     display: none;
   }
 }
@@ -1053,6 +1041,8 @@ dialog p {
     grid-template-rows: auto auto auto minmax(0, 1fr);
     gap: 0 10px;
     height: 100dvh;
+    max-height: 100dvh;
+    overflow: hidden;
   }
 
   .hud,
@@ -1081,7 +1071,8 @@ dialog p {
     min-height: 58px;
   }
 
-  .keyboard-tip {
+  .keyboard-tip,
+  .mc-hotbar-label {
     display: none;
   }
 }
@@ -1097,9 +1088,9 @@ dialog p {
 
 .mc-exit-button {
   display: grid;
-  width: 54px;
-  height: 42px;
-  padding: 4px;
+  width: 42px;
+  height: 32px;
+  padding: 3px;
   border: 3px solid #2b2b2b;
   border-right-color: #efefef;
   border-bottom-color: #efefef;
@@ -1114,12 +1105,12 @@ dialog p {
   height: 100%;
   background: linear-gradient(90deg, #ff496d, #ffce3c, #41e5a1, #42baff, #a46cff);
   color: #06162d;
-  font-size: .78rem;
+  font-size: .62rem;
   font-weight: 1000;
 }
 
 .mc-mini-btn {
-  padding: 8px 10px !important;
+  padding: 4px 8px !important;
   border: 3px solid #2b2b2b !important;
   border-right-color: #efefef !important;
   border-bottom-color: #efefef !important;
@@ -1131,10 +1122,11 @@ dialog p {
 
 .mc-hotbar {
   display: grid;
-  gap: 4px;
+  gap: 2px;
   width: min(1100px, 100%);
-  margin: 6px auto 8px;
-  padding: 6px 8px;
+  flex-shrink: 0;
+  margin: 2px auto 4px;
+  padding: 3px 6px;
   border: 3px solid #2b2b2b;
   border-right-color: #efefef;
   border-bottom-color: #efefef;
@@ -1144,7 +1136,7 @@ dialog p {
 .mc-hotbar-label {
   margin: 0;
   color: #243447;
-  font-size: .76rem;
+  font-size: .58rem;
   font-weight: 800;
   text-align: center;
 }
@@ -1158,18 +1150,18 @@ dialog p {
 
 .mc-hotbar-name {
   display: block;
-  margin-top: 1px;
+  margin-top: 0;
   color: #1b1b1b;
-  font-size: .58rem;
+  font-size: .48rem;
   font-weight: 800;
-  line-height: 1.1;
+  line-height: 1.05;
 }
 
 .hotbar-slot {
-  width: 52px;
+  width: 42px;
   height: auto;
-  min-height: 52px;
-  padding: 2px 1px 3px;
+  min-height: 42px;
+  padding: 1px 1px 2px;
 }
 
 .mc-slot-count {
@@ -1472,7 +1464,7 @@ dialog p {
   }
 
   .mc-exit-button {
-    width: 48px;
-    height: 38px;
+    width: 38px;
+    height: 30px;
   }
 }

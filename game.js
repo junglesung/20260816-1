@@ -1227,7 +1227,7 @@ function renderItemHotbar() {
         ${count ? `<span class="mc-slot-count">${count}</span>` : ""}
       </button>`;
   }).join("");
-  itemHotbar.innerHTML = `<p class="mc-hotbar-label">道具格子（點一下播出）｜1上 2後 3左 4右｜5或空白加速｜6罩 7雷 8彈 9加人｜0補血 Q子彈加速（各1星）</p><div class="mc-hotbar-row">${slots}</div>`;
+  itemHotbar.innerHTML = `<p class="mc-hotbar-label">點格子播出</p><div class="mc-hotbar-row">${slots}</div>`;
 }
 
 function skipRemainingPackLevels() {
