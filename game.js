@@ -49,6 +49,7 @@ const DOOR_HITS_NEEDED = 300;
 const PACK_SIZE = 10;
 const SQUAD_SCALE = 0.68;
 const FIXED_SPEED_MULT = 2.5;
+const PLAYER_MOVE_MULT = 0.14;
 const SHIELD_PLATES = [12, 9, 13, 6, 5, 4, 3, 2, 1];
 const LASER_DAMAGE = 7;
 const LASER_DURATION = 10;
@@ -95,6 +96,9 @@ let selectedChapter = 1;
 let selectedPack = 1;
 let fireAim = "front";
 let usingPointer = false;
+let pointerTargetX = null;
+let pointerTargetY = null;
+let pointerPushSide = null;
 let view = { width: 900, height: 620, dpr: 1 };
 let lastFrame = 0;
 let animationId = 0;
@@ -532,6 +536,24 @@ function update(dt, now) {
   }
 }
 
+function playerMoveSpeed() {
+  return Math.max(96, view.width * PLAYER_MOVE_MULT);
+}
+
+function movePlayerToward(targetX, targetY, speed, dt) {
+  const dx = targetX - game.player.x;
+  const dy = targetY - game.player.y;
+  const dist = Math.hypot(dx, dy);
+  if (dist < 0.5) {
+    game.player.x = targetX;
+    game.player.y = targetY;
+    return;
+  }
+  const step = Math.min(speed * dt, dist);
+  game.player.x += (dx / dist) * step;
+  game.player.y += (dy / dist) * step;
+}
+
 function updatePlayer(dt) {
   const bounds = arena();
   if (game.falling) {
@@ -542,22 +564,32 @@ function updatePlayer(dt) {
     return;
   }
 
-  const speed = Math.max(230, view.width * 0.38);
-  if (!usingPointer) {
-    if (keys.left) game.player.x -= speed * dt;
-    if (keys.right) game.player.x += speed * dt;
-  }
-  if (keys.back) game.player.y += speed * 0.58 * dt;
-  if (!keys.back && !usingPointer) {
-    const homeY = view.height - 52;
-    game.player.y += (homeY - game.player.y) * Math.min(1, dt * 5);
-  }
-
+  const speed = playerMoveSpeed();
   const leftEdge = bounds.innerLeft + 16;
   const rightEdge = bounds.innerRight - 16;
+  const minY = view.height * 0.68;
+  const maxY = view.height - 28;
+
+  if (usingPointer && pointerTargetX != null) {
+    movePlayerToward(pointerTargetX, pointerTargetY ?? game.player.y, speed, dt);
+    if (pointerPushSide === "left" && game.player.x <= leftEdge + 1.5) {
+      tryPushBrokenWall("left");
+    } else if (pointerPushSide === "right" && game.player.x >= rightEdge - 1.5) {
+      tryPushBrokenWall("right");
+    }
+  } else {
+    if (keys.left) game.player.x -= speed * dt;
+    if (keys.right) game.player.x += speed * dt;
+    if (keys.back) game.player.y += speed * 0.58 * dt;
+    if (!keys.back) {
+      const homeY = view.height - 52;
+      game.player.y += (homeY - game.player.y) * Math.min(1, dt * 3.2);
+    }
+  }
+
   // 按鍵／螢幕按鈕操作：只在通道內移動，不會撞牆、也不會掉下去
   game.player.x = clamp(game.player.x, leftEdge, rightEdge);
-  game.player.y = clamp(game.player.y, view.height * 0.68, view.height - 28);
+  game.player.y = clamp(game.player.y, minY, maxY);
   if (game.player.x > leftEdge + 8 && game.player.x < rightEdge - 8) {
     markWallsCleared();
   }
@@ -892,7 +924,7 @@ function spawnEnemies(dt) {
     maxHp: hp,
     shield,
     shieldMax: shield,
-    speed: (big ? 30 : 46) * FIXED_SPEED_MULT,
+    speed: big ? 30 : 46,
     shootTimer: random(700, 1400),
     phase: random(0, Math.PI * 2),
     falling: false
@@ -2051,6 +2083,9 @@ function resetProgress() {
 
 function setDirection(direction, pressed) {
   usingPointer = false;
+  pointerTargetX = null;
+  pointerTargetY = null;
+  pointerPushSide = null;
   keys[direction] = pressed;
   document.querySelector(`[data-direction="${direction}"]`)?.classList.toggle("active", pressed);
 }
@@ -2326,35 +2361,50 @@ window.addEventListener("keyup", (event) => {
 });
 
 let dragging = false;
-canvas.addEventListener("pointerdown", (event) => {
-  dragging = true;
-  usingPointer = true;
-  canvas.setPointerCapture(event.pointerId);
-});
-canvas.addEventListener("pointermove", (event) => {
-  if (!dragging || !game || game.falling || game.over) return;
+
+function aimWithPointer(event) {
+  if (!game || game.falling || game.over) return;
   usingPointer = true;
   const bounds = arena();
   const rect = canvas.getBoundingClientRect();
   const x = event.clientX - rect.left;
+  const y = event.clientY - rect.top;
   const leftEdge = bounds.innerLeft + 16;
   const rightEdge = bounds.innerRight - 16;
+  const minY = view.height * 0.68;
+  const maxY = view.height - 28;
   if (x < leftEdge) {
-    tryPushBrokenWall("left");
-    game.player.x = leftEdge;
+    pointerTargetX = leftEdge;
+    pointerPushSide = "left";
   } else if (x > rightEdge) {
-    tryPushBrokenWall("right");
-    game.player.x = rightEdge;
+    pointerTargetX = rightEdge;
+    pointerPushSide = "right";
   } else {
-    game.player.x = clamp(x, leftEdge, rightEdge);
-    if (x > leftEdge + 8 && x < rightEdge - 8) markWallsCleared();
+    pointerTargetX = clamp(x, leftEdge, rightEdge);
+    pointerPushSide = null;
   }
-  game.player.y = clamp(event.clientY - rect.top, view.height * 0.68, view.height - 28);
-});
-canvas.addEventListener("pointerup", () => {
+  pointerTargetY = clamp(y, minY, maxY);
+}
+
+function clearPointerAim() {
   dragging = false;
   usingPointer = false;
+  pointerTargetX = null;
+  pointerTargetY = null;
+  pointerPushSide = null;
+}
+
+canvas.addEventListener("pointerdown", (event) => {
+  dragging = true;
+  canvas.setPointerCapture(event.pointerId);
+  aimWithPointer(event);
 });
+canvas.addEventListener("pointermove", (event) => {
+  if (!dragging) return;
+  aimWithPointer(event);
+});
+canvas.addEventListener("pointerup", clearPointerAim);
+canvas.addEventListener("pointercancel", clearPointerAim);
 
 window.addEventListener("resize", resizeCanvas);
 window.addEventListener("blur", () => {
