@@ -232,13 +232,11 @@ function makeGame(chapter, subLevel) {
     particles: [],
     pickups: [],
     dispensers: [
-      { type: "member", zone: "left", timer: 3.5, interval: 11 },
-      { type: "heal", zone: "right", timer: 6, interval: 10 },
-      { type: "shieldBlue", zone: "left", timer: 8, interval: 16 },
-      { type: "shieldWhite", zone: "right", timer: 10, interval: 18 },
-      { type: "shieldRed", zone: "middle", timer: 12, interval: 20 },
-      { type: "laser", zone: "left", timer: 5.5, interval: 14 },
-      { type: "bomb", zone: "right", timer: 7, interval: 15 }
+      { type: "shieldBlue", slot: 0, timer: 1.2, interval: 11 },
+      { type: "laser", slot: 1, timer: 2.0, interval: 12 },
+      { type: "shieldWhite", slot: 2, timer: 2.8, interval: 13 },
+      { type: "shieldRed", slot: 3, timer: 3.6, interval: 13 },
+      { type: "bomb", slot: 4, timer: 1.8, interval: 12 }
     ],
     leftDoor: { hits: 0, max: DOOR_HITS_NEEDED, open: false, spin: 0 },
     rightDoor: { hits: 0, max: DOOR_HITS_NEEDED, open: false, spin: 0 },
@@ -430,8 +428,9 @@ function beginLevel() {
   game.laser = { active: false, time: 0, pulse: 0 };
   game.bomb = { active: false, time: 0 };
   game.dispensers.forEach((dispenser, index) => {
-    dispenser.timer = 2.5 + index * 1.5;
+    dispenser.timer = 0.6 + index * 0.35;
   });
+  spawnAllPowerPickups();
   game.running = true;
   game.paused = false;
   game.over = false;
@@ -711,34 +710,40 @@ function updatePowers(dt) {
   }
 }
 
-function updateDispensers(dt) {
+function dispenserSpot(dispenser, bounds) {
+  const slots = Math.max(1, game.dispensers.length);
+  const slot = Number.isFinite(dispenser.slot) ? dispenser.slot : 0;
+  const pad = 18;
+  const inner = bounds.corridor - pad * 2;
+  const x = bounds.innerLeft + pad + (inner * (slot + 0.5)) / slots;
+  return { x, y: 62 };
+}
+
+function spawnPowerPickup(dispenser) {
   const bounds = arena();
+  const spot = dispenserSpot(dispenser, bounds);
+  game.pickups.push({
+    x: spot.x,
+    y: spot.y + 18,
+    vx: 0,
+    vy: 110,
+    radius: 14,
+    phase: random(0, 6),
+    type: dispenser.type
+  });
+}
+
+function spawnAllPowerPickups() {
+  game.dispensers.forEach((dispenser) => spawnPowerPickup(dispenser));
+}
+
+function updateDispensers(dt) {
   game.dispensers.forEach((dispenser) => {
     dispenser.timer -= dt;
     if (dispenser.timer > 0) return;
     dispenser.timer = dispenser.interval;
-
-    const spot = dispenserSpot(dispenser, bounds);
-    const speed = 225;
-    let vx = 0;
-    if (dispenser.zone === "left") vx = speed * 0.45;
-    if (dispenser.zone === "right") vx = -speed * 0.45;
-    game.pickups.push({
-      x: spot.x,
-      y: spot.y,
-      vx,
-      vy: speed,
-      radius: 13,
-      phase: random(0, 6),
-      type: dispenser.type
-    });
+    spawnPowerPickup(dispenser);
   });
-}
-
-function dispenserSpot(dispenser, bounds) {
-  if (dispenser.zone === "left") return { x: bounds.innerLeft * 0.45, y: view.height * 0.28 };
-  if (dispenser.zone === "right") return { x: bounds.innerRight + (view.width - bounds.innerRight) * 0.55, y: view.height * 0.28 };
-  return { x: view.width / 2, y: view.height * 0.11 };
 }
 
 function enemyLevelScale() {
@@ -1410,7 +1415,7 @@ function drawArena() {
   ctx.fillText(rightText, bounds.mid + bounds.corridor * 0.28, 24);
   ctx.fillStyle = "#9eb6d0";
   ctx.font = "700 10px Microsoft JhengHei";
-  ctx.fillText("左門加人 · 右門補血", bounds.mid, 38);
+  ctx.fillText("藍罩 白罩 紅罩 雷射 巨彈會從上方掉下來", bounds.mid, 38);
 }
 
 function drawDoor(side, bounds) {
@@ -1514,23 +1519,21 @@ function drawDispensers() {
   game.dispensers.forEach((dispenser) => {
     const spot = dispenserSpot(dispenser, bounds);
     const info = dispenserInfo(dispenser.type);
-    const width = dispenser.zone === "middle"
-      ? Math.min(84, bounds.corridor * 0.9)
-      : Math.min(72, Math.max(48, (bounds.innerLeft) * 0.55));
+    const width = Math.min(62, bounds.corridor / 5.4);
     ctx.save();
     ctx.translate(spot.x, spot.y);
     ctx.fillStyle = "#0d2138ee";
     ctx.strokeStyle = info.color;
     ctx.lineWidth = 3;
-    roundRect(-width / 2, -28, width, 56, 10);
+    roundRect(-width / 2, -22, width, 44, 8);
     ctx.fill();
     ctx.stroke();
     ctx.fillStyle = info.color;
     ctx.textAlign = "center";
-    ctx.font = `900 ${Math.max(13, width * 0.19)}px Microsoft JhengHei`;
-    ctx.fillText(info.title, 0, 2);
-    ctx.font = "800 10px Microsoft JhengHei";
-    ctx.fillText("2.5 倍送出", 0, 19);
+    ctx.font = "900 12px Microsoft JhengHei";
+    ctx.fillText(info.title, 0, 0);
+    ctx.font = "800 9px Microsoft JhengHei";
+    ctx.fillText("會掉下來", 0, 14);
     ctx.restore();
   });
 }
