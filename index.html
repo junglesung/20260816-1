@@ -10,7 +10,7 @@
 <body>
   <main class="app">
     <section id="startScreen" class="start-screen" aria-labelledby="gameTitle">
-      <p id="updateStamp" class="update-stamp" aria-label="程式更新時間">更新時間：2026/08/16 18:50</p>
+      <p id="updateStamp" class="update-stamp" aria-label="程式更新時間">更新時間：2026/08/17 05:04</p>
       <div class="hero-card">
         <p class="eyebrow">小隊射擊闖關遊戲</p>
         <h1 id="gameTitle">
@@ -34,7 +34,7 @@
         </div>
 
         <div class="progress-row">
-          <div><span>目前關卡</span><strong id="homeLevel">1</strong></div>
+          <div><span>目前章節</span><strong id="homeLevel">1</strong></div>
           <div><span>累積分數</span><strong id="homeScore">0</strong></div>
           <div><span>收集星星</span><strong id="homeStars">0</strong></div>
         </div>
@@ -46,17 +46,19 @@
             <li><span>🎁</span> 左牆送出加一人、右牆送出補血、中間送出加射速，速度 2.5 倍且只有我們吃得到。</li>
             <li><span>🛡️</span> 大巨人有 500 滴盾牌，打破盾牌後才會露出持槍的人。</li>
             <li><span>⭐</span> 打爆小兵得 5 分掉小星星（1 顆）；打爆大人得 10 分掉大星星（5 顆）。</li>
-            <li><span>🔫</span> 每過一關輪流獲得新槍與新子彈，可在武器庫查看與裝備。</li>
-            <li><span>📈</span> 每過一關，敵人血量與砲彈速度都會等比再加一倍。</li>
-            <li><span>🏁</span> 第 10 關全是大巨人，通過即獲得最終勝利。</li>
+            <li><span>🔫</span> 每過一小關輪流獲得新槍與新子彈，可在武器庫查看與裝備。</li>
+            <li><span>📈</span> 小關越後面，敵人血量與砲彈速度都會再加一倍。</li>
+            <li><span>🗺️</span> 主畫面只有已解鎖章節；第 1 章打完 100 小關才出現第 2 章，第 2 章打完 200 小關才出現第 3 章，依此類推到第 10 章（需 1000 小關）。</li>
+            <li><span>🏁</span> 第 10 章全是大巨人，全部打通即獲得最終勝利。</li>
           </ul>
           <p class="tip">操作：左右按鈕移動、向後撤退；隊伍會自動開火。</p>
         </section>
 
-        <button id="startButton" class="rainbow-button" type="button">
-          <span id="startButtonText">開始遊戲</span>
-          <small>準備迎戰紅色軍團！</small>
-        </button>
+        <section class="chapter-panel" aria-labelledby="chapterListTitle">
+          <h2 id="chapterListTitle" class="panel-title">關卡列表</h2>
+          <p class="panel-hint">一開始只會出現第 1 章；點進去後再挑戰裡面的小關。</p>
+          <div id="chapterList" class="stage-list" role="list"></div>
+        </section>
 
         <div class="home-actions">
           <button id="arsenalButton" class="ghost-button" type="button">🔫 武器庫</button>
@@ -65,15 +67,28 @@
       </div>
     </section>
 
+    <section id="stageSelectScreen" class="stage-select-screen" hidden aria-labelledby="stageSelectTitle">
+      <div class="stage-select-card">
+        <header class="stage-select-header">
+          <button id="backToHomeButton" class="ghost-button" type="button">← 回主畫面</button>
+          <div class="stage-select-heading">
+            <h2 id="stageSelectTitle">第 1 章</h2>
+            <p id="stageSelectHint" class="panel-hint">一開始只會出現第 1 小關，打通後才會解鎖下一小關。</p>
+          </div>
+        </header>
+        <div id="subLevelList" class="stage-list" role="list"></div>
+      </div>
+    </section>
+
     <section id="gameScreen" class="game-screen" hidden aria-label="遊戲畫面">
       <header class="hud">
         <div class="hud-brand">
-          <button id="homeButton" class="home-button" type="button">回去主畫面</button>
+          <button id="homeButton" class="home-button" type="button">回關卡列表</button>
           <button id="rulesButton" class="icon-button" type="button" aria-label="查看規則">？</button>
           <button id="musicButton" class="icon-button" type="button" aria-label="開關背景音樂" aria-pressed="true">♪</button>
         </div>
         <div class="stats">
-          <span>關卡 <strong id="levelValue">1</strong></span>
+          <span>關卡 <strong id="levelValue">1-1</strong></span>
           <span>隊員 <strong id="squadValue">1</strong></span>
           <span>分數 <strong id="scoreValue">0</strong></span>
           <span>星星 <strong id="starValue">0</strong></span>
@@ -120,6 +135,7 @@
       <p>左右移動藍色小隊、向後撤退閃避。隊伍會自動射擊，消滅所有紅色敵軍即可過關。</p>
       <p>左右城牆會送出加一人與補血，中間送出加射速，這些補給只有我們吃得到。</p>
       <p>大巨人要先打破 500 滴盾牌才會露出持槍的人；打爆小兵 5 分、大人 10 分。</p>
+      <p>主畫面會列出已解鎖章節；每一章要打完對應數量的小關，才會解鎖下一章。</p>
     </dialog>
 
     <dialog id="arsenalDialog">

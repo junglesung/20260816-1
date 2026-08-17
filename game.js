@@ -1,8 +1,8 @@
 const canvas = document.querySelector("#gameCanvas");
 const ctx = canvas.getContext("2d");
 const startScreen = document.querySelector("#startScreen");
+const stageSelectScreen = document.querySelector("#stageSelectScreen");
 const gameScreen = document.querySelector("#gameScreen");
-const startButton = document.querySelector("#startButton");
 const pauseButton = document.querySelector("#pauseButton");
 const messageBox = document.querySelector("#message");
 const praiseLayer = document.querySelector("#praiseLayer");
@@ -10,6 +10,10 @@ const rulesDialog = document.querySelector("#rulesDialog");
 const arsenalDialog = document.querySelector("#arsenalDialog");
 const arsenalBody = document.querySelector("#arsenalBody");
 const musicButton = document.querySelector("#musicButton");
+const chapterList = document.querySelector("#chapterList");
+const subLevelList = document.querySelector("#subLevelList");
+const stageSelectTitle = document.querySelector("#stageSelectTitle");
+const stageSelectHint = document.querySelector("#stageSelectHint");
 
 const ui = {
   level: document.querySelector("#levelValue"),
@@ -21,11 +25,10 @@ const ui = {
   ammoName: document.querySelector("#ammoName"),
   homeLevel: document.querySelector("#homeLevel"),
   homeScore: document.querySelector("#homeScore"),
-  homeStars: document.querySelector("#homeStars"),
-  startButtonText: document.querySelector("#startButtonText")
+  homeStars: document.querySelector("#homeStars")
 };
 
-const MAX_LEVEL = 10;
+const MAX_CHAPTER = 10;
 const MEMBER_HP = 1111;
 
 const guns = [
@@ -49,24 +52,68 @@ const STORAGE_KEY = "藍紅小隊進度";
 const keys = { left: false, right: false, back: false };
 
 let progress = loadProgress();
+let selectedChapter = 1;
 let view = { width: 900, height: 620, dpr: 1 };
 let lastFrame = 0;
 let animationId = 0;
 let game = null;
 
+function chapterGoal(chapter) {
+  return chapter * 100;
+}
+
+function defaultChapterCleared() {
+  return Array.from({ length: MAX_CHAPTER }, () => 0);
+}
+
+function normalizeChapterCleared(raw, legacyLevel) {
+  const cleared = defaultChapterCleared();
+  if (Array.isArray(raw)) {
+    for (let i = 0; i < MAX_CHAPTER; i += 1) {
+      cleared[i] = clamp(Number(raw[i]) || 0, 0, chapterGoal(i + 1));
+    }
+    return cleared;
+  }
+  if (raw && typeof raw === "object") {
+    for (let i = 1; i <= MAX_CHAPTER; i += 1) {
+      cleared[i - 1] = clamp(Number(raw[i]) || 0, 0, chapterGoal(i));
+    }
+    return cleared;
+  }
+  const migrated = clamp(Number(legacyLevel) || 1, 1, MAX_CHAPTER);
+  cleared[0] = Math.max(0, migrated - 1);
+  return cleared;
+}
+
 function loadProgress() {
-  const fallback = { level: 1, score: 0, stars: 0, gunsOwned: 1, ammosOwned: 1, gunIndex: 0, ammoIndex: 0 };
+  const fallback = {
+    score: 0,
+    stars: 0,
+    gunsOwned: 1,
+    ammosOwned: 1,
+    gunIndex: 0,
+    ammoIndex: 0,
+    chapterCleared: defaultChapterCleared(),
+    chapter: 1,
+    subLevel: 1
+  };
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
     if (!saved || typeof saved !== "object") return fallback;
+    const chapterCleared = normalizeChapterCleared(saved.chapterCleared, saved.level);
+    const chapter = clamp(Number(saved.chapter) || 1, 1, MAX_CHAPTER);
+    const maxSub = chapterGoal(chapter);
+    const subLevel = clamp(Number(saved.subLevel) || Math.min(chapterCleared[chapter - 1] + 1, maxSub), 1, maxSub);
     return {
-      level: clamp(Number(saved.level) || 1, 1, MAX_LEVEL),
       score: Math.max(0, Number(saved.score) || 0),
       stars: Math.max(0, Number(saved.stars) || 0),
       gunsOwned: clamp(Number(saved.gunsOwned) || 1, 1, guns.length),
       ammosOwned: clamp(Number(saved.ammosOwned) || 1, 1, ammos.length),
       gunIndex: clamp(Number(saved.gunIndex) || 0, 0, guns.length - 1),
-      ammoIndex: clamp(Number(saved.ammoIndex) || 0, 0, ammos.length - 1)
+      ammoIndex: clamp(Number(saved.ammoIndex) || 0, 0, ammos.length - 1),
+      chapterCleared,
+      chapter,
+      subLevel
     };
   } catch (error) {
     return fallback;
@@ -75,6 +122,39 @@ function loadProgress() {
 
 function saveProgress() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(progress));
+}
+
+function getChapterCleared(chapter) {
+  return progress.chapterCleared[chapter - 1] || 0;
+}
+
+function setChapterCleared(chapter, value) {
+  progress.chapterCleared[chapter - 1] = clamp(value, 0, chapterGoal(chapter));
+}
+
+function isChapterUnlocked(chapter) {
+  if (chapter <= 1) return true;
+  if (chapter > MAX_CHAPTER) return false;
+  return getChapterCleared(chapter - 1) >= chapterGoal(chapter - 1);
+}
+
+function highestUnlockedChapter() {
+  let unlocked = 1;
+  for (let chapter = 2; chapter <= MAX_CHAPTER; chapter += 1) {
+    if (!isChapterUnlocked(chapter)) break;
+    unlocked = chapter;
+  }
+  return unlocked;
+}
+
+function visibleSubLevelCount(chapter) {
+  const cleared = getChapterCleared(chapter);
+  const goal = chapterGoal(chapter);
+  return Math.min(goal, cleared + 1);
+}
+
+function difficultyScale(chapter, subLevel) {
+  return (chapter - 1) * 100 + subLevel;
 }
 
 function currentGun() {
@@ -89,9 +169,10 @@ function bulletDamage() {
   return currentGun().damage * currentAmmo().multiplier;
 }
 
-function makeGame() {
+function makeGame(chapter, subLevel) {
   return {
-    level: progress.level,
+    chapter,
+    subLevel,
     score: progress.score,
     stars: progress.stars,
     squad: [{ hp: MEMBER_HP, maxHp: MEMBER_HP }],
@@ -125,11 +206,79 @@ function arena() {
   return { left, right, thickness, innerLeft: left + thickness / 2, innerRight: right - thickness / 2 };
 }
 
-function startGame() {
+function openStageSelect(chapter) {
+  if (!isChapterUnlocked(chapter)) return;
+  selectedChapter = chapter;
   startScreen.hidden = true;
+  gameScreen.hidden = true;
+  stageSelectScreen.hidden = false;
+  renderSubLevelList();
+}
+
+function returnToHome() {
+  cancelAnimationFrame(animationId);
+  animationId = 0;
+  Object.keys(keys).forEach((key) => setDirection(key, false));
+  if (game) {
+    game.running = false;
+    game.paused = false;
+    progress.score = game.score;
+    progress.stars = game.stars;
+    progress.chapter = game.chapter;
+    progress.subLevel = game.subLevel;
+    saveProgress();
+  }
+  clearPraise();
+  hideMessage();
+  stopMusic();
+  game = null;
+  gameScreen.hidden = true;
+  stageSelectScreen.hidden = true;
+  startScreen.hidden = false;
+  updateHomeInfo();
+  renderChapterList();
+}
+
+function returnToStageSelect() {
+  cancelAnimationFrame(animationId);
+  animationId = 0;
+  Object.keys(keys).forEach((key) => setDirection(key, false));
+  if (game) {
+    game.running = false;
+    game.paused = false;
+    progress.score = game.score;
+    progress.stars = game.stars;
+    progress.chapter = game.chapter;
+    progress.subLevel = game.subLevel;
+    selectedChapter = game.chapter;
+    saveProgress();
+  }
+  clearPraise();
+  hideMessage();
+  stopMusic();
+  game = null;
+  gameScreen.hidden = true;
+  startScreen.hidden = true;
+  stageSelectScreen.hidden = false;
+  renderSubLevelList();
+  updateHomeInfo();
+}
+
+function startGame(chapter, subLevel) {
+  if (!isChapterUnlocked(chapter)) return;
+  const maxSub = visibleSubLevelCount(chapter);
+  if (subLevel < 1 || subLevel > maxSub) return;
+
+  selectedChapter = chapter;
+  progress.chapter = chapter;
+  progress.subLevel = subLevel;
+  saveProgress();
+
+  startScreen.hidden = true;
+  stageSelectScreen.hidden = true;
   gameScreen.hidden = false;
   resizeCanvas();
-  game = makeGame();
+  game = makeGame(chapter, subLevel);
   beginLevel();
   startMusic();
   lastFrame = performance.now();
@@ -138,8 +287,11 @@ function startGame() {
 }
 
 function beginLevel() {
-  const allBig = game.level >= MAX_LEVEL;
-  game.enemyTotal = allBig ? 8 : Math.min(8 + game.level * 2, 26);
+  const allBig = game.chapter >= MAX_CHAPTER;
+  const spawnPressure = Math.min(game.subLevel, 80);
+  game.enemyTotal = allBig
+    ? Math.min(8 + Math.floor(game.subLevel / 50), 18)
+    : Math.min(8 + spawnPressure * 2, 40);
   game.spawned = 0;
   game.spawnTimer = 400;
   game.enemies.length = 0;
@@ -264,7 +416,13 @@ function dispenserSpot(dispenser, bounds) {
 }
 
 function enemyLevelScale() {
-  return game.level;
+  return difficultyScale(game.chapter, game.subLevel);
+}
+
+function enemyHpScale() {
+  const raw = enemyLevelScale();
+  if (raw <= 10) return raw;
+  return 10 + Math.pow(raw - 10, 0.72);
 }
 
 function spawnEnemies(dt) {
@@ -273,10 +431,10 @@ function spawnEnemies(dt) {
   if (game.spawnTimer > 0) return;
 
   const bounds = arena();
-  const allBig = game.level >= MAX_LEVEL;
+  const allBig = game.chapter >= MAX_CHAPTER;
   const big = allBig || game.spawned === 0 || game.spawned % 4 === 0;
   const radius = big ? 34 : 16;
-  const scale = enemyLevelScale();
+  const scale = enemyHpScale();
   const hp = (big ? 100 : 1) * scale;
   const shield = (big ? 500 : 0) * scale;
   game.enemies.push({
@@ -293,7 +451,9 @@ function spawnEnemies(dt) {
     phase: random(0, Math.PI * 2)
   });
   game.spawned += 1;
-  game.spawnTimer = allBig ? 1500 : Math.max(420, 950 - game.level * 20);
+  game.spawnTimer = allBig
+    ? Math.max(900, 1500 - Math.floor(game.subLevel / 20) * 20)
+    : Math.max(320, 950 - Math.min(game.subLevel, 40) * 16);
 }
 
 function shoot(now) {
@@ -370,7 +530,7 @@ function updateEnemies(dt) {
       enemy.shootTimer -= dt * 1000;
       if (enemy.shootTimer <= 0 && enemy.y > 20 && enemy.y < view.height * 0.72) {
         const angle = Math.atan2(game.player.y - enemy.y, game.player.x - enemy.x);
-        const bulletSpeed = 185 * enemyLevelScale();
+        const bulletSpeed = Math.min(2200, 185 * Math.min(12, 1 + Math.log2(Math.max(2, enemyLevelScale()))));
         game.enemyBullets.push({
           x: enemy.x,
           y: enemy.y + enemy.radius,
@@ -487,8 +647,8 @@ function damageSquad(amount) {
   if (game.squad.length === 0) endGame();
 }
 
-function grantLevelReward(completedLevel) {
-  if (completedLevel % 2 === 1) {
+function grantLevelReward(completedCount) {
+  if (completedCount % 2 === 1) {
     if (progress.gunsOwned < guns.length) {
       progress.gunsOwned += 1;
       progress.gunIndex = progress.gunsOwned - 1;
@@ -504,30 +664,76 @@ function grantLevelReward(completedLevel) {
   return "所有子彈都已收集完成！";
 }
 
+function totalClearedSubLevels() {
+  return progress.chapterCleared.reduce((sum, value) => sum + value, 0);
+}
+
 function completeLevel() {
   game.betweenLevels = true;
-  const completed = game.level;
-  const rewardText = grantLevelReward(completed);
+  const chapter = game.chapter;
+  const completedSub = game.subLevel;
+  const goal = chapterGoal(chapter);
+  const isNewClear = completedSub > getChapterCleared(chapter);
+  const rewardText = isNewClear
+    ? grantLevelReward(totalClearedSubLevels() + 1)
+    : "這小關已通關過，繼續前進吧！";
+
+  if (isNewClear) {
+    setChapterCleared(chapter, completedSub);
+  }
+
   progress.score = game.score;
   progress.stars = game.stars;
+  progress.chapter = chapter;
+  progress.subLevel = Math.min(Math.max(completedSub + 1, progress.subLevel), goal);
+  saveProgress();
+  updateHud();
 
-  if (completed >= MAX_LEVEL) {
-    progress.level = MAX_LEVEL;
-    saveProgress();
-    updateHud();
+  const chapterDone = getChapterCleared(chapter) >= goal;
+  const nextChapter = chapter + 1;
+  const unlockedNext = chapterDone && nextChapter <= MAX_CHAPTER && isChapterUnlocked(nextChapter);
+
+  if (chapter === MAX_CHAPTER && chapterDone) {
     showVictory();
     return;
   }
 
-  game.level += 1;
-  progress.level = game.level;
-  saveProgress();
-  updateHud();
+  if (chapterDone && isNewClear) {
+    const unlockText = unlockedNext
+      ? `<br>已解鎖第 ${nextChapter} 章！主畫面現在會出現下一章。`
+      : "";
+    showMessage(
+      `第 ${chapter} 章完成！`,
+      `${rewardText}<br>你打完了全部 ${goal} 小關。${unlockText}<br>目前分數 ${game.score} 分、星星 ${game.stars} 顆。`,
+      unlockedNext ? "前往下一章" : "回到關卡列表",
+      () => {
+        if (unlockedNext) openStageSelect(nextChapter);
+        else returnToHome();
+      }
+    );
+    return;
+  }
+
+  if (completedSub >= goal) {
+    showMessage(
+      `第 ${chapter} 章 · 第 ${completedSub} 小關完成！`,
+      `${rewardText}<br>這一章已全部打通。<br>目前分數 ${game.score} 分、星星 ${game.stars} 顆。`,
+      "回到關卡列表",
+      () => returnToHome()
+    );
+    return;
+  }
+
   showMessage(
-    `第 ${completed} 關完成！`,
-    `${rewardText}<br>目前分數 ${game.score} 分、星星 ${game.stars} 顆。`,
-    "進入下一關",
-    () => beginLevel()
+    `第 ${chapter} 章 · 第 ${completedSub} 小關完成！`,
+    `${rewardText}<br>進度 ${getChapterCleared(chapter)} / ${goal}<br>目前分數 ${game.score} 分、星星 ${game.stars} 顆。`,
+    "進入下一小關",
+    () => {
+      game.subLevel = completedSub + 1;
+      progress.subLevel = game.subLevel;
+      saveProgress();
+      beginLevel();
+    }
   );
 }
 
@@ -537,9 +743,9 @@ function showVictory() {
   showPraise();
   showMessage(
     "全部通關！",
-    `你打敗了第 ${MAX_LEVEL} 關的大巨人軍團！<br>總分 ${game.score} 分、星星 ${game.stars} 顆。`,
+    `你打通了第 ${MAX_CHAPTER} 章的大巨人軍團！<br>總分 ${game.score} 分、星星 ${game.stars} 顆。`,
     "回到主畫面",
-    () => returnToStart()
+    () => returnToHome()
   );
 }
 
@@ -565,13 +771,15 @@ function endGame() {
   game.running = false;
   progress.score = game.score;
   progress.stars = game.stars;
+  progress.chapter = game.chapter;
+  progress.subLevel = game.subLevel;
   saveProgress();
   showMessage(
     "藍色小隊全滅",
-    `你停在第 ${game.level} 關，分數 ${game.score} 分。<br>裝備與進度都會保留，再來一次吧！`,
+    `你停在第 ${game.chapter} 章第 ${game.subLevel} 小關，分數 ${game.score} 分。<br>裝備與進度都會保留，再來一次吧！`,
     "重新挑戰本關",
     () => {
-      game = makeGame();
+      game = makeGame(game.chapter, game.subLevel);
       beginLevel();
     }
   );
@@ -579,7 +787,7 @@ function endGame() {
 
 function updateHud() {
   if (game) {
-    ui.level.textContent = game.level;
+    ui.level.textContent = `${game.chapter}-${game.subLevel}`;
     ui.squad.textContent = game.squad.length;
     ui.score.textContent = game.score;
     ui.stars.textContent = game.stars;
@@ -591,10 +799,59 @@ function updateHud() {
 }
 
 function updateHomeInfo() {
-  ui.homeLevel.textContent = progress.level;
+  ui.homeLevel.textContent = `${highestUnlockedChapter()}`;
   ui.homeScore.textContent = progress.score;
   ui.homeStars.textContent = progress.stars;
-  ui.startButtonText.textContent = progress.level > 1 ? `繼續第 ${progress.level} 關` : "開始遊戲";
+}
+
+function renderChapterList() {
+  const items = [];
+  for (let chapter = 1; chapter <= MAX_CHAPTER; chapter += 1) {
+    if (!isChapterUnlocked(chapter)) break;
+    const cleared = getChapterCleared(chapter);
+    const goal = chapterGoal(chapter);
+    const done = cleared >= goal;
+    const current = !done && (chapter === progress.chapter || cleared > 0 || chapter === 1);
+    items.push(`
+      <button class="stage-item${done ? " cleared" : ""}${current && !done ? " current" : ""}"
+        type="button" role="listitem" data-chapter="${chapter}">
+        <span class="stage-item-index">${chapter}</span>
+        <span class="stage-item-body">
+          <span class="stage-item-title">第 ${chapter} 章</span>
+          <span class="stage-item-meta">小關進度 ${cleared} / ${goal}${chapter >= MAX_CHAPTER ? " · 大巨人章節" : ""}</span>
+        </span>
+        <span class="stage-item-status">${done ? "已通關" : cleared > 0 ? "繼續挑戰" : "開始挑戰"}</span>
+      </button>
+    `);
+  }
+  chapterList.innerHTML = items.join("");
+}
+
+function renderSubLevelList() {
+  const chapter = selectedChapter;
+  const goal = chapterGoal(chapter);
+  const cleared = getChapterCleared(chapter);
+  const visible = visibleSubLevelCount(chapter);
+  stageSelectTitle.textContent = `第 ${chapter} 章`;
+  stageSelectHint.textContent = `共 ${goal} 小關。一開始只會出現第 1 小關，打通後才會解鎖下一小關。打完 ${goal} 小關後才能解鎖下一章。`;
+
+  const items = [];
+  for (let sub = 1; sub <= visible; sub += 1) {
+    const isCleared = sub <= cleared;
+    const isCurrent = sub === cleared + 1 || (cleared >= goal && sub === goal);
+    items.push(`
+      <button class="stage-item${isCleared ? " cleared" : ""}${isCurrent && !isCleared ? " current" : ""}"
+        type="button" role="listitem" data-sub-level="${sub}">
+        <span class="stage-item-index">${sub}</span>
+        <span class="stage-item-body">
+          <span class="stage-item-title">第 ${sub} 小關</span>
+          <span class="stage-item-meta">${sub === 1 && chapter === 1 ? "原本的第一關挑戰" : `難度倍率 ×${difficultyScale(chapter, sub)}`}</span>
+        </span>
+        <span class="stage-item-status">${isCleared ? "已通過" : "挑戰"}</span>
+      </button>
+    `);
+  }
+  subLevelList.innerHTML = items.join("");
 }
 
 function draw() {
@@ -966,29 +1223,25 @@ function togglePause() {
 }
 
 function returnToStart() {
-  cancelAnimationFrame(animationId);
-  animationId = 0;
-  Object.keys(keys).forEach((key) => setDirection(key, false));
-  if (game) {
-    game.running = false;
-    game.paused = false;
-    progress.score = game.score;
-    progress.stars = game.stars;
-    progress.level = game.level;
-    saveProgress();
-  }
-  clearPraise();
-  hideMessage();
-  stopMusic();
-  gameScreen.hidden = true;
-  startScreen.hidden = false;
-  updateHomeInfo();
+  returnToHome();
 }
 
 function resetProgress() {
-  progress = { level: 1, score: 0, stars: 0, gunsOwned: 1, ammosOwned: 1, gunIndex: 0, ammoIndex: 0 };
+  progress = {
+    score: 0,
+    stars: 0,
+    gunsOwned: 1,
+    ammosOwned: 1,
+    gunIndex: 0,
+    ammoIndex: 0,
+    chapterCleared: defaultChapterCleared(),
+    chapter: 1,
+    subLevel: 1
+  };
+  selectedChapter = 1;
   saveProgress();
   updateHomeInfo();
+  renderChapterList();
   renderArsenal();
 }
 
@@ -1151,12 +1404,27 @@ function toggleMusic() {
   }
 }
 
-startButton.addEventListener("click", startGame);
 pauseButton.addEventListener("click", togglePause);
 musicButton.addEventListener("click", toggleMusic);
-document.querySelector("#homeButton").addEventListener("click", returnToStart);
+document.querySelector("#homeButton").addEventListener("click", () => {
+  if (selectedChapter && isChapterUnlocked(selectedChapter)) returnToStageSelect();
+  else returnToHome();
+});
+document.querySelector("#backToHomeButton").addEventListener("click", returnToHome);
 document.querySelector("#rulesButton").addEventListener("click", () => rulesDialog.showModal());
 document.querySelector("#resetButton").addEventListener("click", resetProgress);
+
+chapterList.addEventListener("click", (event) => {
+  const item = event.target.closest("[data-chapter]");
+  if (!item) return;
+  openStageSelect(Number(item.dataset.chapter));
+});
+
+subLevelList.addEventListener("click", (event) => {
+  const item = event.target.closest("[data-sub-level]");
+  if (!item) return;
+  startGame(selectedChapter, Number(item.dataset.subLevel));
+});
 document.querySelector("#arsenalButton").addEventListener("click", () => {
   renderArsenal();
   arsenalDialog.showModal();
@@ -1254,6 +1522,7 @@ motionStyle.textContent = `
 document.head.appendChild(motionStyle);
 
 updateHomeInfo();
+renderChapterList();
 renderArsenal();
 ui.gunName.textContent = currentGun().name;
 ui.ammoName.textContent = currentAmmo().name;
