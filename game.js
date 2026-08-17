@@ -12,6 +12,9 @@ const arsenalDialog = document.querySelector("#arsenalDialog");
 const arsenalBody = document.querySelector("#arsenalBody");
 const shopDialog = document.querySelector("#shopDialog");
 const shopBody = document.querySelector("#shopBody");
+const itemHotbar = document.querySelector("#itemHotbar");
+const skipWallButton = document.querySelector("#skipWallButton");
+const continueWallButton = document.querySelector("#continueWallButton");
 const musicButton = document.querySelector("#musicButton");
 const chapterList = document.querySelector("#chapterList");
 const packList = document.querySelector("#packList");
@@ -44,7 +47,7 @@ const ui = {
 };
 
 const MAX_CHAPTER = 10;
-const MEMBER_HP = 1111;
+const MEMBER_HP = 50;
 const DOOR_HITS_NEEDED = 300;
 const PACK_SIZE = 10;
 const SQUAD_SCALE = 0.68;
@@ -55,6 +58,8 @@ const CARRIER_HP = 50;
 const CARRIER_HIT = 5;
 const CARRIER_SPEED = 88;
 const BATTLE_BOOST_TIME = 8;
+const SHOP_ROOM_SLOTS = 27;
+const HOTBAR_SLOTS = 9;
 const SHIELD_PLATES = [12, 9, 13, 6, 5, 4, 3, 2, 1];
 const LASER_DAMAGE = 7;
 const LASER_DURATION = 10;
@@ -104,6 +109,8 @@ let usingPointer = false;
 let pointerTargetX = null;
 let pointerTargetY = null;
 let pointerPushSide = null;
+let selectedShopId = "shieldBlue";
+let pendingAdvance = null;
 let view = { width: 900, height: 620, dpr: 1 };
 let lastFrame = 0;
 let animationId = 0;
@@ -171,7 +178,8 @@ function loadProgress() {
     leftWallCleared: false,
     rightWallCleared: false,
     cc: 1,
-    shopItem: null
+    shopItem: null,
+    shopRoom: []
   };
   try {
     const saved = JSON.parse(localStorage.getItem(STORAGE_KEY));
@@ -195,11 +203,38 @@ function loadProgress() {
       leftWallCleared: Boolean(saved.leftWallCleared),
       rightWallCleared: Boolean(saved.rightWallCleared),
       cc: saved.cc == null ? 1 : Math.max(0, Number(saved.cc) || 0),
-      shopItem: saved.shopItem || null
+      shopItem: null,
+      shopRoom: normalizeShopRoom(saved)
     };
   } catch (error) {
     return fallback;
   }
+}
+
+function normalizeShopRoom(saved) {
+  const allowed = new Set(SHOP_ITEMS.map((item) => item.id));
+  const room = Array.isArray(saved?.shopRoom)
+    ? saved.shopRoom.filter((id) => allowed.has(id))
+    : [];
+  if (!room.length && saved?.shopItem && allowed.has(saved.shopItem)) {
+    room.push(saved.shopItem);
+  }
+  return room.slice(0, SHOP_ROOM_SLOTS);
+}
+
+function shopItemMeta(id) {
+  const item = SHOP_ITEMS.find((entry) => entry.id === id);
+  if (!item) return { id, name: "空", short: "", color: "#8b8b8b" };
+  if (id === "shieldBlue") return { ...item, short: "藍", color: "#4db7ff" };
+  if (id === "shieldWhite") return { ...item, short: "白", color: "#f4f8ff" };
+  if (id === "shieldRed") return { ...item, short: "紅", color: "#ff536d" };
+  if (id === "laser") return { ...item, short: "雷", color: "#ff6a3c" };
+  return { ...item, short: "彈", color: "#7ec8ff" };
+}
+
+function squadHpTotal() {
+  if (!game) return MEMBER_HP;
+  return game.squad.reduce((sum, member) => sum + member.hp, 0);
 }
 
 function saveProgress() {
@@ -286,6 +321,7 @@ function makeGame(chapter, subLevel) {
     laser: { active: false, time: 0, pulse: 0 },
     bomb: { active: false, time: 0 },
     expectCCRefund: false,
+    refundKinds: [],
     running: true,
     paused: false,
     over: false,
@@ -468,8 +504,13 @@ function beginLevel() {
   game.laser = { active: false, time: 0, pulse: 0 };
   game.bomb = { active: false, time: 0 };
   game.expectCCRefund = false;
+  if (game.refundKinds?.length) {
+    progress.cc = 1;
+    saveProgress();
+  }
+  game.refundKinds = [];
   game.dispensers = makeDoorDispensers();
-  applyShopItemForThisRun();
+  renderItemHotbar();
   game.running = true;
   game.paused = false;
   game.over = false;
@@ -858,14 +899,17 @@ function spawnDoorCarrier(type, side) {
   const bounds = arena();
   const box = doorBox(side, bounds);
   const speed = type === "member" ? CARRIER_SPEED * FIXED_SPEED_MULT : CARRIER_SPEED;
+  const hp = CARRIER_HP * Math.max(1, game.squad.length);
+  const liveMembers = game.pickups.filter((item) => item.carrier && item.type === "member").length;
+  if (type === "member" && liveMembers >= Math.max(1, game.squad.length)) return;
   game.pickups.push({
     x: box.x + box.w / 2,
     y: box.y + box.h * 0.58,
     vx: side === "left" ? speed : -speed,
     vy: 0,
     radius: 17,
-    hp: CARRIER_HP,
-    maxHp: CARRIER_HP,
+    hp,
+    maxHp: hp,
     carrier: true,
     phase: random(0, 6),
     type
@@ -894,75 +938,211 @@ function updateDispensers(dt) {
 }
 
 function maybeRefundShopCC() {
-  if (!game || !game.expectCCRefund || !game.shopKind) return;
-  if (game.shopKind === "laser" && !game.laser.active) grantCCOnUseUp();
-  else if (game.shopKind === "bomb" && !game.bomb.active) grantCCOnUseUp();
-  else if (String(game.shopKind).startsWith("shield") && !game.shield.active) grantCCOnUseUp();
+  if (!game || !Array.isArray(game.refundKinds) || !game.refundKinds.length) return;
+  game.refundKinds = game.refundKinds.filter((kind) => {
+    if (kind === "laser" && game.laser.active) return true;
+    if (kind === "bomb" && game.bomb.active) return true;
+    if (String(kind).startsWith("shield") && game.shield.active) return true;
+    grantCCOnUseUp();
+    return false;
+  });
 }
 
 function shopItemName(id) {
   return SHOP_ITEMS.find((item) => item.id === id)?.name || "尚未購買";
 }
 
-function applyShopItemForThisRun() {
-  const item = progress.shopItem;
-  if (!item || !game) return;
-  progress.shopItem = null;
-  game.expectCCRefund = true;
-  game.shopKind = item;
+function roomItemSummary() {
+  if (!progress.shopRoom?.length) return "房間是空的";
+  const counts = {};
+  progress.shopRoom.forEach((id) => {
+    counts[id] = (counts[id] || 0) + 1;
+  });
+  return Object.entries(counts)
+    .map(([id, count]) => `${shopItemName(id)}${count > 1 ? `×${count}` : ""}`)
+    .join("、");
+}
+
+function mcSlotButton(id, extraClass = "", disabled = false) {
+  const meta = shopItemMeta(id);
+  const filled = Boolean(id);
+  return `
+    <button class="mc-slot${filled ? " filled" : ""}${extraClass}" type="button" ${id ? `data-shop-item="${id}"` : ""} ${disabled ? "disabled" : ""}>
+      ${filled ? `<span class="mc-slot-icon" style="background:${meta.color}">${meta.short}</span>` : ""}
+    </button>`;
+}
+
+function activateBoughtItem(id) {
+  if (id === "shieldBlue") activateShield("blue");
+  else if (id === "shieldWhite") activateShield("white");
+  else if (id === "shieldRed") activateShield("red");
+  else if (id === "laser") activateLaser();
+  else if (id === "bomb") activateBomb();
+}
+
+function deployRoomItem(index) {
+  if (!game || game.over || game.falling) {
+    floatingNotice("進關後按格子才會播出", "#ffd83d");
+    return;
+  }
+  const id = progress.shopRoom[index];
+  if (!id) return;
+  progress.shopRoom.splice(index, 1);
+  game.refundKinds = game.refundKinds || [];
+  game.refundKinds.push(id);
   saveProgress();
-  if (item === "shieldBlue") activateShield("blue");
-  else if (item === "shieldWhite") activateShield("white");
-  else if (item === "shieldRed") activateShield("red");
-  else if (item === "laser") activateLaser();
-  else if (item === "bomb") activateBomb();
+  activateBoughtItem(id);
   renderShop();
+  renderItemHotbar();
+  updateHud();
+  floatingNotice(`${shopItemName(id)}播出了！`, shopItemMeta(id).color);
 }
 
 function grantCCOnUseUp() {
-  if (!game || !game.expectCCRefund) return;
-  game.expectCCRefund = false;
   progress.cc = 1;
   saveProgress();
   updateHud();
   renderShop();
+  renderItemHotbar();
   floatingNotice("用完了，獲得 1 顆 CC", "#ffd83d");
+}
+
+function showServiceCart(id) {
+  const cartItem = document.querySelector("#serviceCartItem");
+  if (!cartItem) return;
+  const meta = shopItemMeta(id);
+  cartItem.textContent = meta.short;
+  cartItem.style.background = meta.color;
+  cartItem.classList.remove("loaded");
+  void cartItem.offsetWidth;
+  cartItem.classList.add("loaded");
 }
 
 function buyShopItem(id) {
   const item = SHOP_ITEMS.find((entry) => entry.id === id);
   if (!item) return;
-  if (progress.shopItem) {
-    floatingNotice("這次已經買過了，先去用完再買", "#ffd83d");
+  selectedShopId = item.id;
+  if (!Array.isArray(progress.shopRoom)) progress.shopRoom = [];
+  if (progress.shopRoom.length >= SHOP_ROOM_SLOTS) {
+    floatingNotice("房間已經滿了！", "#ffd83d");
+    renderShop();
     return;
   }
   if ((progress.cc || 0) < item.cost) {
     floatingNotice("CC 不夠！", "#ff7187");
+    renderShop();
     return;
   }
   progress.cc -= item.cost;
-  progress.shopItem = item.id;
+  progress.shopRoom.push(item.id);
   saveProgress();
   renderShop();
+  renderItemHotbar();
   updateHud();
-  floatingNotice(`已購買${item.name}，進關就會使用`, item.id.includes("shield") ? "#4db7ff" : "#ffd83d");
+  showServiceCart(item.id);
+  floatingNotice(`已購買${item.name}，送到房間了`, item.id.includes("shield") ? "#4db7ff" : "#ffd83d");
 }
 
 function renderShop() {
   if (!shopBody) return;
+  if (!Array.isArray(progress.shopRoom)) progress.shopRoom = [];
   if (ui.shopCC) ui.shopCC.textContent = String(progress.cc || 0);
-  if (ui.shopOwned) ui.shopOwned.textContent = progress.shopItem ? shopItemName(progress.shopItem) : "尚未購買";
+  if (ui.shopOwned) ui.shopOwned.textContent = roomItemSummary();
+  const shopSlots = Array.from({ length: 9 }, (_, index) => {
+    const item = SHOP_ITEMS[index];
+    if (!item) return mcSlotButton("", "", true);
+    const selected = selectedShopId === item.id ? " selected" : "";
+    return `
+      <button class="mc-slot filled${selected}" type="button" data-shop-item="${item.id}" title="${item.name}">
+        <span class="mc-slot-icon" style="background:${shopItemMeta(item.id).color}">${shopItemMeta(item.id).short}</span>
+      </button>`;
+  }).join("");
+  const roomSlots = Array.from({ length: SHOP_ROOM_SLOTS }, (_, index) => {
+    const id = progress.shopRoom[index];
+    return mcSlotButton(id, "", true);
+  }).join("");
   shopBody.innerHTML = `
-    <div class="arsenal-list">
-      ${SHOP_ITEMS.map((item) => `
-        <button class="arsenal-item${progress.shopItem === item.id ? " equipped" : ""}" type="button" data-shop-item="${item.id}">
-          <span class="arsenal-name">${item.name}</span>
-          <span class="arsenal-dots">${item.cost} CC</span>
-          <span class="arsenal-detail">${item.detail}</span>
-          ${progress.shopItem === item.id ? '<span class="arsenal-badge">這次要用</span>' : ""}
-        </button>
-      `).join("")}
+    <div class="mc-chest">
+      <p class="mc-chest-label">選擇商品（選好就買）</p>
+      <div class="mc-grid">${shopSlots}</div>
+      <button id="buyRainbowButton" class="rainbow-buy-button" type="button">
+        <span>購買</span>
+        <small>1 CC</small>
+      </button>
+      <div class="mc-service-cart" id="serviceCart">
+        <div class="mc-cart-item loaded" id="serviceCartItem">${shopItemMeta(progress.shopRoom.at(-1) || selectedShopId).short}</div>
+        <div class="mc-cart-bed"></div>
+        <div class="mc-cart-body"></div>
+        <div class="mc-cart-wheels"><span></span><span></span></div>
+        <p>服務車</p>
+      </div>
+      <p class="mc-chest-label">裡面的房間（格子都是滿的）</p>
+      <div class="mc-grid room-grid">${roomSlots}</div>
     </div>`;
+  const cartItem = document.querySelector("#serviceCartItem");
+  if (cartItem) {
+    const last = progress.shopRoom.at(-1) || selectedShopId;
+    cartItem.style.background = shopItemMeta(last).color;
+  }
+}
+
+function renderItemHotbar() {
+  if (!itemHotbar) return;
+  if (!Array.isArray(progress.shopRoom)) progress.shopRoom = [];
+  itemHotbar.innerHTML = Array.from({ length: HOTBAR_SLOTS }, (_, index) => {
+    const id = progress.shopRoom[index];
+    const meta = id ? shopItemMeta(id) : null;
+    return `
+      <button class="mc-slot${id ? " filled" : ""}" type="button" data-hotbar-index="${index}" ${id ? "" : "disabled"} title="${id ? shopItemName(id) : "空格子"}">
+        ${id ? `<span class="mc-slot-icon" style="background:${meta.color}">${meta.short}</span>` : ""}
+      </button>`;
+  }).join("");
+}
+
+function skipRemainingPackLevels() {
+  if (!game) return;
+  const chapter = game.chapter;
+  const pack = packOfSubLevel(game.subLevel);
+  const range = packRange(pack);
+  const goal = chapterGoal(chapter);
+  setChapterCleared(chapter, Math.max(getChapterCleared(chapter), range.end));
+  progress.chapter = chapter;
+  progress.subLevel = Math.min(range.end + 1, goal);
+  progress.score = game.score;
+  progress.stars = game.stars;
+  saveProgress();
+  const skippedAll = range.end >= goal;
+  floatingNotice(skippedAll ? "已去掉這章剩下的關卡" : "已去掉這組剩下的關卡", "#ffd83d");
+  cancelAnimationFrame(animationId);
+  animationId = 0;
+  stopMusic();
+  hideMessage();
+  clearPraise();
+  game = null;
+  selectedChapter = chapter;
+  updateHomeInfo();
+  renderChapterList();
+  hideMenuScreens();
+  if (skippedAll) {
+    startScreen.hidden = false;
+    return;
+  }
+  packSelectScreen.hidden = false;
+  renderPackList();
+}
+
+function continuePlaying() {
+  if (pendingAdvance) {
+    const action = pendingAdvance;
+    pendingAdvance = null;
+    action();
+    return;
+  }
+  if (game?.paused) {
+    togglePause();
+    return;
+  }
+  floatingNotice("繼續打這一關！", "#9fd8ff");
 }
 
 function enemyLevelScale() {
@@ -1476,7 +1656,7 @@ function endGame() {
 function updateHud() {
   if (game) {
     ui.level.textContent = `${game.chapter}-${game.subLevel}`;
-    ui.squad.textContent = game.squad.length;
+    ui.squad.textContent = `${game.squad.length}／${Math.ceil(squadHpTotal())}`;
     ui.score.textContent = game.score;
     ui.stars.textContent = game.stars;
     ui.speed.textContent = game.battleBoost > 0
@@ -1930,6 +2110,14 @@ function drawSquad() {
   const active = game.squad[game.squad.length - 1];
   if (active) {
     const width = 48;
+    const total = Math.max(0, Math.ceil(squadHpTotal()));
+    ctx.fillStyle = "#fff7c2";
+    ctx.font = "900 13px Microsoft JhengHei";
+    ctx.textAlign = "center";
+    ctx.strokeStyle = "#082033";
+    ctx.lineWidth = 3;
+    ctx.strokeText(`${total}`, game.player.x, game.player.y - 36);
+    ctx.fillText(`${total}`, game.player.x, game.player.y - 36);
     ctx.fillStyle = "#072238";
     ctx.fillRect(game.player.x - width / 2, game.player.y + 22, width, 5);
     ctx.fillStyle = "#46e991";
@@ -2141,9 +2329,13 @@ function floatingNotice(text, color) {
 }
 
 function showMessage(title, text, buttonText, action) {
+  pendingAdvance = action;
   messageBox.innerHTML = `<h2>${title}</h2><p>${text}</p><button type="button">${buttonText}</button>`;
   messageBox.hidden = false;
-  messageBox.querySelector("button").addEventListener("click", action, { once: true });
+  messageBox.querySelector("button").addEventListener("click", () => {
+    pendingAdvance = null;
+    action();
+  }, { once: true });
 }
 
 function hideMessage() {
@@ -2183,7 +2375,8 @@ function resetProgress() {
     leftWallCleared: false,
     rightWallCleared: false,
     cc: 1,
-    shopItem: null
+    shopItem: null,
+    shopRoom: []
   };
   selectedChapter = 1;
   saveProgress();
@@ -2191,6 +2384,7 @@ function resetProgress() {
   renderChapterList();
   renderArsenal();
   renderShop();
+  renderItemHotbar();
 }
 
 function setDirection(direction, pressed) {
@@ -2436,10 +2630,23 @@ arsenalBody.addEventListener("click", (event) => {
 });
 
 shopBody.addEventListener("click", (event) => {
+  if (event.target.closest("#buyRainbowButton")) {
+    buyShopItem(selectedShopId);
+    return;
+  }
   const item = event.target.closest("[data-shop-item]");
-  if (!item) return;
+  if (!item || item.disabled) return;
   buyShopItem(item.dataset.shopItem);
 });
+
+itemHotbar?.addEventListener("click", (event) => {
+  const slot = event.target.closest("[data-hotbar-index]");
+  if (!slot || slot.disabled) return;
+  deployRoomItem(Number(slot.dataset.hotbarIndex));
+});
+
+skipWallButton?.addEventListener("click", skipRemainingPackLevels);
+continueWallButton?.addEventListener("click", continuePlaying);
 
 document.querySelectorAll(".move-button").forEach((button) => {
   const direction = button.dataset.direction;
@@ -2536,5 +2743,6 @@ updateHomeInfo();
 renderChapterList();
 renderArsenal();
 renderShop();
+renderItemHotbar();
 ui.gunName.textContent = currentGun().name;
 ui.ammoName.textContent = currentAmmo().name;

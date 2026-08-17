@@ -5,12 +5,12 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#07162d">
   <title>藍紅小隊大對決</title>
-  <link rel="stylesheet" href="styles.css?v=202608170627">
+  <link rel="stylesheet" href="styles.css?v=202608170644">
 </head>
 <body>
   <main class="app">
     <section id="startScreen" class="start-screen" aria-labelledby="gameTitle">
-      <p id="updateStamp" class="update-stamp" aria-label="程式更新時間">更新時間：2026/08/17 06:27</p>
+      <p id="updateStamp" class="update-stamp" aria-label="程式更新時間">更新時間：2026/08/17 06:44</p>
       <div class="hero-card">
         <p class="eyebrow">小隊射擊闖關遊戲</p>
         <h1 id="gameTitle">
@@ -52,8 +52,9 @@
             <li><span>🔴</span> 雷射 10 秒、傷害 7，一排打過去，前面紅後面橘。</li>
             <li><span>💣</span> 巨型炸彈 1 秒後砰，巨人會掉下去，並把防護罩變成藍色。</li>
             <li><span>⚡</span> 射速固定 2.5 倍，我方子彈 1.5 倍；小隊改為慢走，滑鼠拖曳也不會瞬移。</li>
-            <li><span>🛒</span> 防護罩、雷射、巨彈不再免費掉在場上，要到商店花 1 顆 CC 購買「這次要用的」。</li>
-            <li><span>🪙</span> 用完後 CC 會回到 0，再送給你 1 顆 CC，下次才能再買。</li>
+            <li><span>🛒</span> 商店是 Minecraft 小格子。選好就買，彩虹按鈕下方有服務車；買到的防護罩／雷射／巨彈會進房間格子，進關後按格子才會播出。</li>
+            <li><span>❤️</span> 一個人上面顯示 50 滴血，兩個人大約 100 滴。點下一關會把物資接著帶下去，直到沒有關卡。</li>
+            <li><span>🧱</span> 旁邊有兩道石牆：不想玩會把這組剩下的關去掉；另一道牆繼續玩。</li>
             <li><span>🗺️</span> 選章節後再分成多組，每組 10 關。</li>
           </ul>
           <p class="tip">操作：左右移動、向後撤退；可切換子彈打前面、左邊或右邊。</p>
@@ -102,13 +103,15 @@
     <section id="gameScreen" class="game-screen" hidden aria-label="遊戲畫面">
       <header class="hud">
         <div class="hud-brand">
-          <button id="homeButton" class="home-button" type="button">回關卡列表</button>
+          <button id="homeButton" class="mc-exit-button" type="button" aria-label="退出回關卡列表">
+            <span class="mc-exit-core">退出</span>
+          </button>
           <button id="rulesButton" class="icon-button" type="button" aria-label="查看規則">？</button>
           <button id="musicButton" class="icon-button" type="button" aria-label="開關背景音樂" aria-pressed="true">♪</button>
         </div>
         <div class="stats">
           <span>關卡 <strong id="levelValue">1-1</strong></span>
-          <span>隊員 <strong id="squadValue">1</strong></span>
+          <span>隊員／血量 <strong id="squadValue">1／50</strong></span>
           <span>分數 <strong id="scoreValue">0</strong></span>
           <span>星星 <strong id="starValue">0</strong></span>
           <span>射速 <strong id="speedValue">2.50×</strong></span>
@@ -138,12 +141,15 @@
             <button class="aim-button" type="button" data-aim="right">右邊</button>
           </div>
         </div>
-        <button id="openShop" type="button">商店</button>
-        <button id="openArsenal" type="button">武器庫</button>
+        <button id="openShop" class="mc-mini-btn" type="button">商店</button>
+        <button id="openArsenal" class="mc-mini-btn" type="button">武器庫</button>
       </div>
+      <div id="itemHotbar" class="mc-hotbar" aria-label="道具格子，點一下就會播出"></div>
 
       <div id="gameWrap" class="game-wrap">
+        <button id="skipWallButton" class="mc-wall-button skip-wall" type="button">不想玩</button>
         <canvas id="gameCanvas" aria-label="藍色小隊射擊遊戲"></canvas>
+        <button id="continueWallButton" class="mc-wall-button go-wall" type="button">繼續玩</button>
         <div id="praiseLayer" class="praise-layer" aria-hidden="true"></div>
         <div id="message" class="game-message" hidden></div>
         <button id="pauseButton" class="pause-button" type="button" aria-label="暫停遊戲">Ⅱ</button>
@@ -170,7 +176,7 @@
       <p>防護罩是前方一排 12、9、13、6、5、4、3、2、1，藍／白／紅，持續 30 秒。雷射 10 秒傷害 7。巨型炸彈 1 秒後砰。</p>
       <p>左右鐵門各需 300 發打開。打開後會橫向衝出加人、補血與加強戰；加一人的是 2.5 倍速度。這些補給只有 50 滴血，每打中一次扣 5 滴。</p>
       <p>射速固定 2.5 倍，我方子彈 1.5 倍；小隊改為慢走。</p>
-      <p>防護罩、雷射、巨彈改到商店用 1 顆 CC 購買這次要使用的道具；用完後會再給你 1 顆 CC。</p>
+      <p>商店是小格子：選好就買，買到的防護罩／雷射／巨彈會進房間，進關後按格子播出。一人 50 滴血、兩人約 100 滴；下一關會接著帶物資。旁邊石牆可跳過這組剩餘關卡，或繼續玩。</p>
       <p>選章節後分成多組，每組 10 關。</p>
     </dialog>
 
@@ -181,15 +187,15 @@
       <div id="arsenalBody" class="arsenal-body"></div>
     </dialog>
 
-    <dialog id="shopDialog">
+    <dialog id="shopDialog" class="mc-dialog">
       <button class="dialog-close" type="button" data-close="shopDialog" aria-label="關閉商店">×</button>
       <h2 class="rainbow-text">道具商店</h2>
-      <p class="arsenal-hint">場上不再掉雷射與防護罩。每樣 1 顆 CC，一次只能買這次要用的。用完後 CC 回到 0，再送給你 1 顆 CC。</p>
-      <p class="arsenal-hint">目前 CC：<strong id="shopCC">1</strong>　已購買：<strong id="shopOwned">尚未購買</strong></p>
+      <p class="arsenal-hint">房間格子是滿的。點選防護罩、雷射或巨彈後就會購買，進關按格子播出。</p>
+      <p class="arsenal-hint">目前 CC：<strong id="shopCC">1</strong>　房間物資：<strong id="shopOwned">房間是空的</strong></p>
       <div id="shopBody" class="arsenal-body"></div>
     </dialog>
   </main>
 
-  <script src="game.js?v=202608170627"></script>
+  <script src="game.js?v=202608170644"></script>
 </body>
 </html>
