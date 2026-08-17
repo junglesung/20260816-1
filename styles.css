@@ -959,6 +959,20 @@ dialog p {
 }
 
 @media (max-height: 600px) and (orientation: landscape) {
+  .stage-select-screen {
+    padding: 12px;
+    padding-top: 40px;
+    align-items: start;
+  }
+
+  .stage-select-card {
+    width: min(860px, 100%);
+  }
+
+  .stage-select-screen .stage-list {
+    max-height: min(70vh, 420px);
+  }
+
   .game-screen {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 125px;
